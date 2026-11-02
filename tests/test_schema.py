@@ -1,5 +1,5 @@
-from app.schema import (Block, DocIR, SourceRef, build_sections, normalize,
-                        select_chapter, verify_refs)
+from app.schema import (Block, DocIR, SourceRef, build_sections, extract_answer,
+                        normalize, select_chapter, verify_refs)
 
 
 def make_ir():
@@ -53,3 +53,50 @@ def test_verify_refs_drops_hallucination():
 def test_verify_refs_tolerates_line_breaks():
     page_text = {1: "松 弛\n算 子 的 定 义"}
     assert verify_refs([SourceRef(page=1, quote="松弛算子的定义")], page_text)
+
+
+def _line(bid, text, y):
+    return Block(id=bid, kind="para", text=text, page=1,
+                 section_path=["第1章 绪论"], bbox=(60.0, y, 300.0, y + 14.0))
+
+
+def test_verify_refs_rejects_cross_column_stitch():
+    """左栏末尾 + 右栏开头拼起来是两处文字，y 会回跳，必须丢。"""
+    blocks = [_line("b1", "左栏最后一句在这里结束", 700.0),
+              _line("b2", "右栏开头是另一段内容", 60.0)]
+    page_text = {1: "左栏最后一句在这里结束\n右栏开头是另一段内容\n"}
+    bad = SourceRef(page=1, quote="左栏最后一句在这里结束右栏开头是另一段内容")
+    assert verify_refs([bad], page_text, {1: blocks}) == []
+
+
+def test_verify_refs_allows_normally_wrapped_lines():
+    """同一段被排版拆成多行、y 一路往下走，是正常引用。"""
+    blocks = [_line("b1", "这是一句正常换行的话", 100.0),
+              _line("b2", "从上一行接着写下来", 114.0)]
+    page_text = {1: "这是一句正常换行的话\n从上一行接着写下来\n"}
+    good = SourceRef(page=1, quote="正常换行的话从上一行接着写")
+    assert [r.quote for r in verify_refs([good], page_text, {1: blocks})] == [good.quote]
+
+
+def test_verify_refs_without_geometry_still_works():
+    """没给 bbox 时不做行序检查（纯文本调用不误杀）。"""
+    page_text = {1: "这是一句可以在原文里找到的话"}
+    ref = SourceRef(page=1, quote="可以在原文里找到的话")
+    assert [r.quote for r in verify_refs([ref], page_text)] == [ref.quote]
+
+
+def test_extract_answer_handles_free_text():
+    assert extract_answer("B") == "B"
+    assert extract_answer("b.") == "B"
+    assert extract_answer("答案是 B") == "B"
+    assert extract_answer("B. 乙") == "B"
+    assert extract_answer("AC") == "AC"
+    assert extract_answer("因为 C 项不对，所以选 B") == "B"
+    assert extract_answer("") == ""
+    assert extract_answer("不知道") == ""
+
+
+def test_extract_answer_rejects_out_of_range_letter():
+    assert extract_answer("E", 4) == ""
+    assert extract_answer("", 4) == ""
+    assert extract_answer("C", 4) == "C"

@@ -1,4 +1,4 @@
-from app.pipeline import build_lesson
+from app.pipeline import _solve_independently, build_lesson
 from app.schema import (Block, DocIR, LessonSection, Outline, OutlineItem,
                         QuizItem, QuizPack, SourceRef, VerifyResult)
 
@@ -7,8 +7,12 @@ FAKE = "这句话在原文里根本不存在"
 
 
 class FakeLLM:
-    def __init__(self):
+    """按内容而非按位置作答：选项被打乱也照样挑中「乙」。"""
+
+    def __init__(self, blind_to=None):
         self.calls = 0
+        self.blind_to = blind_to
+        self.verify_orders = []
 
     def json(self, system, user, model_cls, temperature=0.3, retries=2):
         self.calls += 1
@@ -29,7 +33,14 @@ class FakeLLM:
                          options=["甲", "乙", "丙", "丁"], answer="A",
                          source_ref=SourceRef(page=1, quote=FAKE))])
         if name == "VerifyResult":
-            return VerifyResult(answer="B" if "好题" in user else "C")
+            self.verify_orders.append(user)
+            if "好题" not in user or (self.blind_to and self.blind_to in user):
+                return VerifyResult(answer="C")
+            for line in user.splitlines():
+                s = line.strip()
+                if len(s) > 3 and s[1] == "." and "乙" in s:
+                    return VerifyResult(answer=s[0])
+            return VerifyResult(answer="?")
         raise AssertionError("未预期的 model_cls: " + name)
 
 
@@ -53,6 +64,47 @@ def test_quiz_retry_does_not_duplicate_items():
     lesson = build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=5)
     stems = [q.stem for q in lesson.quiz]
     assert len(stems) == len(set(stems))
+
+
+def test_verify_sees_two_different_option_orders():
+    """同一道题要被解两次，第二次的选项顺序必须变过。"""
+    llm = FakeLLM()
+    build_lesson(llm, make_ir(), "第1章", n_quiz=2)
+    good = [u for u in llm.verify_orders if "好题" in u]
+    assert len(good) == 2
+    assert good[0] != good[1]
+    assert "A. 甲" in good[0] and "A. 乙" in good[1]
+
+
+def test_quiz_dropped_when_answer_flips_after_shuffle():
+    """打乱后答不上来的题说明是蒙位置，不能算验证通过。"""
+    llm = FakeLLM(blind_to="A. 乙")
+    lesson = build_lesson(llm, make_ir(), "第1章", n_quiz=2)
+    assert lesson.quiz == []
+
+
+def test_quiz_keeps_item_answered_by_content():
+    """答案跟着内容走而不是跟着字母走时，打乱与否都应通过。"""
+    lesson = build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=2)
+    assert [q.stem for q in lesson.quiz] == ["好题：下列说法正确的是？"]
+    assert lesson.quiz[0].verified is True
+
+
+class _Echo:
+    def __init__(self, answer):
+        self.answer = answer
+
+    def json(self, system, user, model_cls, temperature=0.3, retries=2):
+        assert model_cls is VerifyResult
+        return VerifyResult(answer=self.answer)
+
+
+def test_fill_item_compares_text_not_letters():
+    """填空题答案里有字母时不能被抠成选项字母。"""
+    q = QuizItem(type="fill", stem="写出质能方程", answer="E=mc^2")
+    assert _solve_independently(_Echo(" E = mc^2 "), q) is True
+    assert _solve_independently(_Echo("F=ma"), q) is False
+    assert _solve_independently(_Echo(""), q) is False
 
 
 def test_build_lesson_summary_fields():

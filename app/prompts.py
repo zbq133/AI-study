@@ -43,6 +43,7 @@ QUIZ_USER = """需要 {n} 道题，覆盖至少 {k} 个不同知识点，难度�
 
 
 VERIFY_SYS = """你是独立解题的学生。只看题目本身作答，不要参考任何讲义或答案。
+answer 只填选项字母（如 "B" 或 "AC"），不许写汉字、不许写选项内容、不许解释。
 只输出 JSON：{"answer":"B","confidence":0.0,"reason":"不超过40字"}"""
 
 VERIFY_USER = """{stem}

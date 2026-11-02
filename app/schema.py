@@ -8,10 +8,34 @@ from pydantic import BaseModel
 BlockKind = Literal["heading", "para", "list", "formula", "table", "figure", "caption"]
 
 _WS = re.compile(r"[\s\u3000]+")
+_ANS_TOKEN = re.compile(r"(?<![A-Za-z])([A-H]{1,4})(?![A-Za-z])")
+_ANS_PUNCT = re.compile(r"[\s.,;:!?'\"，。；：！？、（）()\[\]【】“”‘’]+")
+_Y_TOL = 20.0
 
 
 def normalize(t: str) -> str:
     return _WS.sub("", t or "")
+
+
+def extract_answer(raw: str, n_options: int = 0) -> str:
+    """把独立解题返回的自由文本收成选项字母串。
+
+    'B' / 'B. 乙' / '答案是 B' / 'AC' 都能收成字母；越界的字母一律作废。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    up = text.upper()
+    flat = _ANS_PUNCT.sub("", up)
+    if re.fullmatch(r"[A-H]{1,4}", flat):
+        cand = flat
+    else:
+        hits = _ANS_TOKEN.findall(up)
+        cand = hits[-1] if hits else ""
+    letters = "".join(sorted(set(cand)))
+    if n_options and any(ord(c) - 65 >= n_options for c in letters):
+        return ""
+    return letters
 
 
 class Block(BaseModel):
@@ -133,11 +157,43 @@ def select_chapter(sections: list[Section], query: str) -> list[Section]:
     return out
 
 
-def verify_refs(refs: list[SourceRef], page_text: dict[int, str]) -> list[SourceRef]:
+def _reading_order_ok(needle: str, blocks: list[Block]) -> bool:
+    """quote 必须落在阅读顺序连续的若干行里。
+
+    同一页里行的 y 坐标应当一路往下走；出现大幅回跳只可能是换了栏或跳到了
+    另一段（双栏排版里左栏末尾接右栏开头就是这个形状），那属于拼接，不算引用。
+    """
+    joined = ""
+    owner: list[int] = []
+    for i, b in enumerate(blocks):
+        t = normalize(b.text)
+        joined += t
+        owner.extend([i] * len(t))
+    if not joined or not needle:
+        return False
+    start = 0
+    while True:
+        pos = joined.find(needle, start)
+        if pos < 0:
+            return False
+        first, last = owner[pos], owner[pos + len(needle) - 1]
+        ys = [blocks[i].bbox[1] for i in range(first, last + 1)
+              if blocks[i].bbox is not None]
+        if all(b2 >= b1 - _Y_TOL for b1, b2 in zip(ys, ys[1:])):
+            return True
+        start = pos + 1
+
+
+def verify_refs(refs: list[SourceRef], page_text: dict[int, str],
+                blocks: Optional[dict[int, list[Block]]] = None) -> list[SourceRef]:
     ok: list[SourceRef] = []
     for r in refs:
         hay = normalize(page_text.get(r.page, ""))
         needle = normalize(r.quote)
-        if len(needle) >= 6 and needle in hay:
-            ok.append(r)
+        if len(needle) < 6 or needle not in hay:
+            continue
+        page_blocks = blocks.get(r.page) if blocks else None
+        if page_blocks and not _reading_order_ok(needle, page_blocks):
+            continue
+        ok.append(r)
     return ok

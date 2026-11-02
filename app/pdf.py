@@ -103,3 +103,10 @@ def page_text_map(ir: DocIR) -> dict[int, str]:
     for b in ir.blocks:
         m[b.page] = m.get(b.page, "") + b.text + "\n"
     return m
+
+
+def page_block_map(ir: DocIR) -> dict[int, list[Block]]:
+    m: dict[int, list[Block]] = {}
+    for b in ir.blocks:
+        m.setdefault(b.page, []).append(b)
+    return m
