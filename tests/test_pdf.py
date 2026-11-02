@@ -1,7 +1,7 @@
 import fitz
 import pytest
 
-from app.pdf import NoTextLayer, _toc_key, extract_ir, page_text_map
+from app.pdf import NoTextLayer, _plausible_title, _toc_key, extract_ir, page_text_map
 
 
 @pytest.fixture()
@@ -70,7 +70,76 @@ def test_extract_ir_raises_on_pdf_without_text_layer(tmp_path):
     doc.close()
 
     with pytest.raises(NoTextLayer):
-        extract_ir(path)
+        extract_ir(path, ocr=False)
+
+
+def test_ocr_fills_text_layer_of_image_only_pdf(tmp_path):
+    # 真课件的样子：字看得见，但整页就是一张图，一个文字行都提不出来
+    src = fitz.open()
+    page = src.new_page(width=420, height=200)
+    page.insert_text((30, 60), "第十章 波动", fontsize=26, fontname="china-s")
+    page.insert_text((30, 110), "机械波在弹性介质中的传播", fontsize=15, fontname="china-s")
+    pix = page.get_pixmap(dpi=150)
+
+    path = tmp_path / "slides.pdf"
+    scanned = fitz.open()
+    target = scanned.new_page(width=420, height=200)
+    target.insert_image(target.rect, pixmap=pix)
+    scanned.save(str(path))
+    scanned.close()
+    src.close()
+
+    # 原生提取一个字都拿不到
+    with pytest.raises(NoTextLayer):
+        extract_ir(path, ocr=False, ocr_cache=None)
+
+    # 走 OCR 才拿得到内容
+    ir = extract_ir(path, ocr=True, ocr_cache=tmp_path / "ocr")
+    assert ir.ocr_pages == [1]
+    text = "".join(b.text for b in ir.blocks)
+    assert "波动" in text or "机械波" in text
+    # OCR 页自己成章：页首"第十章 波动"当标题，不再按字号切出一堆伪标题
+    heads = [b for b in ir.blocks if b.kind == "heading"]
+    assert len(heads) == 1 and heads[0].level == 1
+
+
+def test_ocr_page_gets_its_own_section(tmp_path, monkeypatch):
+    # OCR 页的几何信息不可靠（框高由文字高度推出来，字号全是估的），
+    # 套教材章节那套启发式会把正文行也判成标题。规则改成：每页自己成章，
+    # 页首确实像标题就用它，否则用"第 N 页"兜底。
+    import app.ocr
+
+    path = tmp_path / "slides.pdf"
+    doc = fitz.open()
+    doc.new_page(width=400, height=300)
+    doc.new_page(width=400, height=300)
+    doc.save(str(path))
+    doc.close()
+
+    monkeypatch.setattr("app.pdf._page_lines", lambda page: [])
+
+    def fake_ocr(page, doc_id, pno, cache_dir=None, dpi=200):
+        if pno == 1:
+            return [("横波与纵波", 20.0, False, (10.0, 10.0, 200.0, 40.0))]
+        return [("机械波在弹性介质中的传播.", 10.0, False, (10.0, 10.0, 380.0, 30.0))]
+
+    monkeypatch.setattr(app.ocr, "ocr_page_cached", fake_ocr)
+
+    ir = extract_ir(path, ocr_cache=None)
+    assert ir.ocr_pages == [1, 2]
+    heads = [b.text for b in ir.blocks if b.kind == "heading"]
+    assert heads == ["横波与纵波", "第 2 页"]
+    # 第二页的正文要挂在它自己的"第 2 页"下面，不能串到第一页标题下
+    last = [b for b in ir.blocks if b.page == 2 and b.kind == "para"]
+    assert last and last[0].section_path == ["第 2 页"]
+
+
+def test_plausible_title_filters_ocr_noise():
+    # 真课件上踩到的三类误判
+    assert not _plausible_title("十", 8.0)                      # 单字序号
+    assert not _plausible_title("两类波的不同之处", 0.1)          # 竖排侧栏标签
+    assert not _plausible_title("电磁波交变电磁场在空间的传播.", 16.0)  # 整句正文
+    assert _plausible_title("教学基本要求", 6.1)
 
 
 def test_long_toc_title_matches_body_heading(tmp_path):

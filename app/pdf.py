@@ -24,6 +24,37 @@ class NoTextLayer(RuntimeError):
 
 _TOC_PUNCT = re.compile(r"[\s．.。、,，:：;；\-—_()（）\[\]【】/／]+")
 
+#: 节号前缀。出版方常用 "§10.1 机械波" 表示节，而且后面常常不跟空格。
+_SECTION_NO = re.compile(r"^§+\s*\d")
+
+_TITLE_MAX_CHARS = 42
+_SENTENCE_END = ("。", ".", "，", ",", "；", ";", "：", ":")
+_MIN_TITLE_AR = 2.5
+
+
+def _aspect(bbox) -> float:
+    if not bbox:
+        return 0.0
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    return w / h if h > 0 else 0.0
+
+
+def _plausible_title(text: str, ar: float) -> bool:
+    """一行字像不像标题。
+
+    挡掉真文件里踩到的三类误判：
+    - 单字："十""四""五"（OCR 常把列表序号单独切出来，原生层里也有孤立序号行）
+    - 竖排或方框："两类波的不同之处"这种侧栏标签、示意图里的"波源""介质"
+      —— 它们的框又高又窄，宽高比 0.1~2.0
+    - 整句：句末带标点的一定是正文（"电磁波交变电磁场在空间的传播."）
+    """
+    t = text.strip()
+    if len(t) < 2 or len(t) > _TITLE_MAX_CHARS:
+        return False
+    if ar < _MIN_TITLE_AR:
+        return False
+    return not t.endswith(_SENTENCE_END)
+
 
 def _toc_key(t: str) -> str:
     """TOC 条目与正文标题的比对键：忽略空白，以及编号后的点号差异。
@@ -71,37 +102,102 @@ def _order(lines, page_w):
     return sorted(lines, key=key)
 
 
-def extract_ir(path) -> DocIR:
+def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
+    """把 PDF 变成 DocIR。
+
+    ocr=True 时，整页没有文字层的页面（PPT 导出的图片型课件）会走 OCR 补文字层；
+    有文字层的页永远走原生提取。一页 OCR 约 10 秒，默认缓存到 out/ocr/<doc_id>/，
+    传 ocr_cache=None 关掉缓存。
+    """
     path = Path(path)
     doc = fitz.open(str(path))
-    raw = [(i + 1, _page_lines(p), p.rect.width) for i, p in enumerate(doc)]
-    if not any(lines for _, lines, _ in raw):
+    doc_id = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    if ocr_cache:
+        ocr_cache = Path(ocr_cache)
+
+    raw = []
+    ocr_pages = []
+    for i, page in enumerate(doc):
+        lines = _page_lines(page)
+        if not lines and ocr:
+            from .ocr import ocr_page_cached
+
+            lines = ocr_page_cached(page, doc_id, i + 1, cache_dir=ocr_cache)
+            if lines:
+                ocr_pages.append(i + 1)
+        raw.append((i + 1, lines, page.rect.width, page.rect.height))
+
+    if not any(lines for _, lines, *_ in raw):
+        if ocr:
+            raise NoTextLayer(
+                f"{path.name}：{doc.page_count} 页既没有文字层，OCR 也没认出内容。"
+                "确认文件不是空的或加密的；扫描件可以试着提高 dpi 再跑。"
+            )
         raise NoTextLayer(
-            f"{path.name}：{doc.page_count} 页里没有任何文字层（多半是扫描件或图片型课件）。"
-            "需要先 OCR 成文本层，再交给解析。"
+            f"{path.name}：{doc.page_count} 页里没有任何文字层（扫描件或图片型课件）。"
+            "传 ocr=True 让它走 OCR：extract_ir(path, ocr=True)"
         )
-    base = _mode_size([l[1] for _, lines, _ in raw for l in lines])
+    base = _mode_size([l[1] for _, lines, *_ in raw for l in lines])
 
     toc = [[lvl, title, pno] for lvl, title, pno in (doc.get_toc() or [])]
     toc_map = {_toc_key(t): (lvl, t) for lvl, t, _ in toc}
 
+    ocr_set = set(ocr_pages)
     blocks = []
     stack = []
     bid = 0
-    for pno, lines, page_w in raw:
-        for text, size, bold, bbox in _order(lines, page_w):
+    for pno, lines, page_w, page_h in raw:
+        ordered = _order(lines, page_w)
+        named = False
+        if pno in ocr_set:
+            # OCR 页的几何信息不可靠：框高是文字高度推出来的，字号全是估的，
+            # 套教材章节那套"字号大于正文就叫标题"只会产出一堆伪标题
+            # （竖排侧栏标签、示意图里的"波源""介质"、公式碎片）。
+            # PPT 的语义单元本来就是"一页"：让每页自己成章，
+            # 页首那一行如果确实像标题就用它，否则用"第 N 页"。
+            head = ordered[0] if ordered else None
+            head_text = head[0].strip() if head else ""
+            # 页首那行带冒号的，多半是"标题：正文"被 OCR 并成了一行（标题自己
+            # 很少带冒号），这种宁可退回"第 N 页"，也别把半句正文当章节名。
+            named = bool(head) and bool(
+                _SECTION_NO.match(head_text)
+                or (
+                    "：" not in head_text
+                    and ":" not in head_text
+                    and _plausible_title(head_text, _aspect(head[3]))
+                    and head[3][1] < page_h * 0.35
+                )
+            )
+            if not named:
+                stack.clear()
+                bid += 1
+                label = f"第 {pno} 页"
+                stack.append((1, label))
+                blocks.append(
+                    Block(id=f"b{bid}", kind="heading", text=label, page=pno,
+                          level=1, section_path=[label])
+                )
+
+        for idx, (text, size, bold, bbox) in enumerate(ordered):
             bid += 1
             clean = text.strip()
-            short = len(clean) <= 42
+            ar = _aspect(bbox)
             level = 0
             hit = toc_map.get(_toc_key(clean))
-            if hit:
+            if pno in ocr_set:
+                if _SECTION_NO.match(clean):
+                    level = 1
+                elif idx == 0 and named:
+                    level = 1
+            elif hit:
                 level = hit[0]
-            elif size >= base * 1.15 and short:
+            elif _SECTION_NO.match(clean) and _plausible_title(clean, ar):
+                level = 2 if bold else 3
+            elif size >= base * 1.15 and _plausible_title(clean, ar):
                 level = 1
-            elif size >= base * 1.05 and bold and short and not clean.endswith(("。", ".", "，", ",")):
+            elif size >= base * 1.05 and bold and _plausible_title(clean, ar):
                 level = 2
-            elif bold and short and HEAD_NUM.match(clean):
+            elif bold and _plausible_title(clean, ar) and HEAD_NUM.match(clean):
                 level = 3
 
             if level:
@@ -117,11 +213,12 @@ def extract_ir(path) -> DocIR:
                                     bbox=bbox))
 
     return DocIR(
-        doc_id=hashlib.sha256(path.read_bytes()).hexdigest()[:16],
+        doc_id=doc_id,
         filename=path.name,
         page_count=doc.page_count,
         blocks=blocks,
         toc=toc,
+        ocr_pages=ocr_pages,
     )
 
 

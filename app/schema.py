@@ -54,6 +54,9 @@ class DocIR(BaseModel):
     page_count: int
     blocks: list[Block]
     toc: list[list] = []
+    #: 走了 OCR 的页码。这些页的文字是识别出来的，公式与上下标不可信，
+    #: 引用校验、讲义措辞都该知道这件事——别让下游把它当原生文字层用。
+    ocr_pages: list[int] = []
 
 
 class Section(BaseModel):
