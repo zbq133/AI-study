@@ -1,7 +1,8 @@
-﻿import fitz
+import fitz
 import pytest
 
-from app.pdf import NoTextLayer, _order, _plausible_title, _toc_key, extract_ir, page_text_map
+from app.pdf import (NoTextLayer, _order, _paragraphs, _plausible_title, _toc_key,
+                     extract_ir, page_text_map)
 from app.schema import build_sections
 
 
@@ -211,3 +212,48 @@ def test_long_toc_title_matches_body_heading(tmp_path):
     heads = [b for b in ir.blocks if b.kind == "heading"]
     assert heads and heads[0].text == body
     assert heads[0].level == 2
+
+_ROW = (37.6, 100.0, 291.0, 113.0)
+
+
+def _row(text, y, x0=37.6, x1=291.0, size=8.0):
+    return (text, size, False, (x0, y, x1, y + 13.0))
+
+
+def test_paragraphs_join_lines_of_one_paragraph():
+    lines = [_row("layered structure of the cathode", 100.0),
+             _row("material is prone to deformation", 109.8)]
+    out = _paragraphs(lines, 595.276)
+    assert len(out) == 1
+    assert out[0][0] == "layered structure of the cathode material is prone to deformation"
+
+
+def test_paragraphs_stop_at_a_short_line():
+    lines = [_row("short ending line", 100.0, x1=143.9),
+             _row("next paragraph text", 109.8)]
+    out = _paragraphs(lines, 595.276)
+    assert [t for t, *_ in out] == ["short ending line", "next paragraph text"]
+
+
+def test_paragraphs_break_on_first_line_indent():
+    lines = [_row("end of the first paragraph.", 100.0),
+             _row("Second paragraph starts here", 109.8, x0=49.5)]
+    out = _paragraphs(lines, 595.276)
+    assert len(out) == 2
+
+
+def test_paragraphs_glue_hyphenated_word():
+    lines = [_row("the powder is heated to a high-tempe-", 100.0),
+             _row("rature inside a tube furnace", 109.8)]
+    out = _paragraphs(lines, 595.276)
+    assert len(out) == 1
+    assert "high-temperature inside" in out[0][0]
+
+
+def test_paragraphs_keep_full_width_caption_separate():
+    caption = ("Fig. 1. Separation process of cathode materials from spent LIBs, "
+               "which is a rather long caption spanning both columns of the page.")
+    lines = [_row("body line of the left column", 100.0),
+             _row(caption, 120.0, x1=559.7)]
+    out = _paragraphs(lines, 595.276)
+    assert [t for t, *_ in out] == ["body line of the left column", caption]

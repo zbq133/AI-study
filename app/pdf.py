@@ -121,6 +121,72 @@ def _order(lines, page_w):
     return sorted(lines, key=key)
 
 
+def _glue(head: str, tail: str) -> str:
+    """两行连成一句：中文直接接，英文补空格，行末连字符断词要还原。"""
+    a, b = head.rstrip(), tail.lstrip()
+    if not a:
+        return b
+    if len(a) > 1 and a.endswith("-") and a[-2].isalpha() and b[:1].islower():
+        return a[:-1] + b                       # high-tempe / rature
+    if b[:1].isascii() and b[:1].isalnum():
+        return a + " " + b
+    return a + b
+
+
+def _paragraphs(lines, page_w):
+    """把同一段落的连续行并成一个块。
+
+    每行一个 Block 的话，下游拿到的是一串断在句中的碎片：讲义只能照着碎片写，
+    出题的 quote 也只能引用碎片。判据就两条 —— 上一行写满了它所在栏的右边界，
+    才可能还有下文；下一行没有重新缩进、字号没变、行距正常，才算同一段。
+    """
+    if not lines:
+        return []
+    mid = page_w / 2.0
+
+    def col(x0):
+        return 0 if x0 < mid - 20 else 1
+
+    right_of = {}
+    for _t, _s, _b, bbox in lines:
+        if bbox[2] - bbox[0] >= page_w * _WIDE_RATIO:
+            continue                    # 全宽图注/页眉不代表栏的右边界
+        c = col(bbox[0])
+        right_of[c] = max(right_of.get(c, 0.0), bbox[2])
+
+    out = []
+    cur = None
+    for text, size, bold, bbox in lines:
+        clean = text.strip()
+        if not clean:
+            continue
+        wide = bbox[2] - bbox[0] >= page_w * _WIDE_RATIO
+        if cur is not None:
+            ctext, csize, cbold, cbbox, ctail = cur
+            cur_wide = cbbox[2] - cbbox[0] >= page_w * _WIDE_RATIO
+            same_col = col(bbox[0]) == col(cbbox[0])
+            same_size = abs(size - csize) < 0.5
+            # 看的是"上一行的行末"有没有写到栏右边界，不是整段的最大值 ——
+            # 段末那行短一截，就说明段落到此为止。
+            filled = (right_of[col(cbbox[0])] - ctail) <= 2.0 * csize
+            # 段落首行是缩进的（x0 更大），正文行回到栏的左边界；所以只允许
+            # "往左回到原处"，往右跳一下就是新段落开了头。
+            no_reindent = bbox[0] <= cbbox[0] + 2.0
+            tight = -4.0 <= bbox[1] - cbbox[3] <= 1.5 * csize
+            if (not wide and not cur_wide) and same_col and same_size \
+                    and filled and no_reindent and tight:
+                cur = (_glue(ctext, clean), csize, cbold,
+                       (cbbox[0], cbbox[1],
+                        max(cbbox[2], bbox[2]), max(cbbox[3], bbox[3])),
+                       bbox[2])
+                continue
+            out.append(cur[:4])
+        cur = (clean, size, bold, bbox, bbox[2])
+    if cur is not None:
+        out.append(cur[:4])
+    return out
+
+
 def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
     """把 PDF 变成 DocIR。
 
@@ -162,8 +228,14 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
     toc_map = {_toc_key(t): (lvl, t) for lvl, t, _ in toc}
 
     ocr_set = set(ocr_pages)
-    pages = [(pno, _order(lines, page_w), page_w, page_h)
-             for pno, lines, page_w, page_h in raw]
+    # 原生文字层按段落合并；OCR 出来的 PPT 页不合并 —— 那一行就是一个要点，
+    # 拼起来反而把几个要点揉成一句。
+    pages = []
+    for pno, lines, page_w, page_h in raw:
+        ordered = _order(lines, page_w)
+        if pno not in ocr_set:
+            ordered = _paragraphs(ordered, page_w)
+        pages.append((pno, ordered, page_w, page_h))
     first_ocr = min(ocr_set) if ocr_set else None
     # 整本课件连一个"第X章"都没有时，合成一个用文件名当章名，否则所有块
     # 都会落进「（正文前）」那节里。
