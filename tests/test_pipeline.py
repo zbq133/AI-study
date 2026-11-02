@@ -90,6 +90,33 @@ def test_quiz_keeps_item_answered_by_content():
     assert lesson.quiz[0].verified is True
 
 
+class _NoRefLLM(FakeLLM):
+    """模型干脆不给出处。
+
+    真跑「第十章 波动」时撞上的正是这种：两道题 `source_ref` 全是 null，
+    答案自洽、独立解也通过，于是被当成合格题收进讲义。
+    """
+
+    def json(self, system, user, model_cls, temperature=0.3, retries=2):
+        if getattr(model_cls, "__name__", "") == "QuizPack":
+            self.calls += 1
+            return QuizPack(items=[
+                QuizItem(type="single", stem="好题但没出处：下列说法正确的是？",
+                         options=["甲", "乙", "丙", "丁"], answer="B",
+                         source_ref=None)])
+        return super().json(system, user, model_cls, temperature, retries)
+
+
+def test_quiz_dropped_without_source_ref():
+    """没有出处的题学生点不回原文，要和「出处对不上」一样丢弃。
+
+    这道题答案自洽、两次独立解都能通过，唯一的毛病是没给 quote ——
+    如果只在「给了 ref 但校验失败」时才丢，它就会漏进讲义。
+    """
+    lesson = build_lesson(_NoRefLLM(), make_ir(), "第1章", n_quiz=2)
+    assert lesson.quiz == []
+
+
 class _Echo:
     def __init__(self, answer):
         self.answer = answer

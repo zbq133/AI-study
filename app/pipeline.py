@@ -100,8 +100,14 @@ def make_quiz(llm, lessons, n, page_text, blocks=None):
             if not key or key in seen:
                 continue
             seen.add(key)
-            if q.source_ref and not verify_refs([q.source_ref], page_text, blocks):
-                q.source_ref = None
+            # 铁律是「quote 必须能在原文逐字找到，找不到就丢弃」。原来只拦
+            # 「给了 ref 但校验不过」，模型干脆不给 ref 时反而放行 —— 真跑
+            # 一次就撞上了：两道题 source_ref 全是 null，照样进了讲义。
+            # 没出处的题学生点不回原文，可溯源等于没做，一律丢弃。
+            if not q.source_ref:
+                continue
+            if not verify_refs([q.source_ref], page_text, blocks):
+                continue
             q.verified = _solve_independently(llm, q)
             if q.verified:
                 kept.append(q)
