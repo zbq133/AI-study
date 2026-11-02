@@ -1,4 +1,4 @@
-from app.pipeline import (_bullets, _clip, _render_sources, _solve_independently,
+from app.pipeline import (_bullets, _clip, _render_sources, _solve_independently, _squeeze,
                           build_lesson)
 from app.schema import (Block, DocIR, LessonSection, Outline, OutlineItem,
                         QuizItem, QuizPack, SourceRef, VerifyResult, build_sections)
@@ -210,3 +210,8 @@ def test_build_lesson_unknown_chapter_raises():
         assert "没找到章节" in str(exc)
     else:
         raise AssertionError("应当抛出 ValueError")
+
+def test_squeeze_keeps_english_spaces_and_drops_cjk_ones():
+    assert _squeeze("机械波的传播需\n有传播振动的介质") == "机械波的传播需有传播振动的介质"
+    assert _squeeze("the black\nmass generated") == "the black mass generated"
+    assert _squeeze("黑粉\nblack mass") == "黑粉 black mass"

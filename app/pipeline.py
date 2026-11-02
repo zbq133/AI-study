@@ -20,6 +20,17 @@ def _dedup_key(text: str) -> str:
     return _DE_DUP.sub("", text or "").lower()
 
 
+# 英文折行处要补空格（"the black" + "mass" 不能粘成 "theblackmass"），中文折行
+# 补空格就难看（"机械波的传播需 有传播振动的介质"）—— 只在两侧都不是 ASCII
+# 的时候把空格吃掉。
+_SPACE_BETWEEN_CJK = re.compile(r"(?<=[^\x00-\x7f])\s+(?=[^\x00-\x7f])")
+
+
+def _squeeze(text: str) -> str:
+    """把逐字抄来的多行 quote 压成一行，中文之间不留空格。"""
+    return _SPACE_BETWEEN_CJK.sub("", " ".join((text or "").split()))
+
+
 def _clip(text: str, limit: int = MAX_CHARS) -> str:
     """按行边界截断，不切在句子中间。
 
@@ -153,7 +164,7 @@ def make_quiz(llm, lessons, n, page_text, blocks=None, source=""):
                 continue
             # 校验过了再把摘录里的换行压平：OCR 的行是断开的，逐字通过的 quote
             # 常常长这样「电磁波的传播可\n不需介质」，存进讲义很难看。
-            q.source_ref.quote = " ".join(q.source_ref.quote.split())
+            q.source_ref.quote = _squeeze(q.source_ref.quote)
             q.verified = _solve_independently(llm, q)
             if q.verified:
                 kept.append(q)
