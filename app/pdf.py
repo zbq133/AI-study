@@ -96,16 +96,28 @@ def _page_lines(page):
     return out
 
 
+_WIDE_RATIO = 0.75
+
+
 def _order(lines, page_w):
+    """按阅读顺序排一页的行：双栏就先左后右，单栏就自上而下。
+
+    span 只数"跨过中线、又不占满整行"的窄元素（居中标题、跨栏短句），它们说明
+    这不是干净的左右分栏。图注、表题这类**全宽元素**横跨两栏是正常的 —— 以前把
+    它们也算进 span，一页有两条图注就把整页判成单栏，于是左右栏交错，后半页每
+    一句都接错了上下文（p3 就是这样：14 行左栏和 15 行右栏被按 y 混排）。
+    """
     if not lines:
         return []
     mid = page_w / 2.0
-    left = [l for l in lines if l[3][0] < mid - 20]
-    right = [l for l in lines if l[3][0] >= mid - 20]
-    span = [l for l in lines if l[3][0] < mid and l[3][2] > mid + 20]
+    wide = [l for l in lines if l[3][2] - l[3][0] >= page_w * _WIDE_RATIO]
+    rest = [l for l in lines if l[3][2] - l[3][0] < page_w * _WIDE_RATIO]
+    left = [l for l in rest if l[3][0] < mid - 20]
+    right = [l for l in rest if l[3][0] >= mid - 20]
+    span = [l for l in rest if l[3][0] < mid and l[3][2] > mid + 20]
     key = lambda l: (round(l[3][1], 1), l[3][0])
     if len(left) > 0.3 * len(lines) and len(right) > 0.3 * len(lines) and len(span) <= 2:
-        return sorted(left, key=key) + sorted(right, key=key)
+        return sorted(left, key=key) + sorted(wide + right, key=key)
     return sorted(lines, key=key)
 
 

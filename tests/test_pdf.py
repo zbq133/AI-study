@@ -1,7 +1,7 @@
-import fitz
+﻿import fitz
 import pytest
 
-from app.pdf import NoTextLayer, _plausible_title, _toc_key, extract_ir, page_text_map
+from app.pdf import NoTextLayer, _order, _plausible_title, _toc_key, extract_ir, page_text_map
 from app.schema import build_sections
 
 
@@ -50,6 +50,26 @@ def test_page_text_map_separates_pages(sample_pdf):
 def test_missing_file_raises():
     with pytest.raises(Exception):
         extract_ir("no-such-file.pdf")
+
+
+def test_order_keeps_columns_apart_when_page_has_full_width_captions():
+    """全宽图注横跨两栏是正常的，不能因此把整页判成单栏。
+
+    那份综述的 p3 就是这样：14 行左栏、15 行右栏被按 y 混排成 L1 R1 L2 R2…，
+    后半页每一句都接错了上下文。
+    """
+    W = 600.0
+
+    def line(text, x0, y0, x1):
+        return (text, 8.0, False, (x0, y0, x1, y0 + 10))
+
+    lines = [
+        line("L1", 40, 100, 280), line("L2", 40, 112, 280), line("L3", 40, 124, 280),
+        line("R1", 320, 100, 560), line("R2", 320, 112, 560), line("R3", 320, 124, 560),
+        line("CAP1", 40, 140, 560), line("CAP2", 40, 155, 560), line("CAP3", 40, 170, 560),
+    ]
+    texts = [l[0] for l in _order(lines, W)]
+    assert texts.index("L3") < texts.index("R1")
 
 
 def test_toc_key_ignores_numbering_punctuation():
