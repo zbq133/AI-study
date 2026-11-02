@@ -119,11 +119,17 @@ class Lesson(BaseModel):
     quiz: list[QuizItem] = []
 
 
+_ROOT_LABEL = "（正文前）"
+
+
 def build_sections(ir: DocIR) -> list[Section]:
     order: list[tuple] = []
     box: dict[tuple, Section] = {}
     for b in ir.blocks:
-        key = tuple(b.section_path) if b.section_path else ("__root__",)
+        # 首页的页眉、期刊名、作者信息出现在第一个标题之前，section_path 是空的。
+        # 以前这里塞 "__root__" 当键，会一路漏到 CLI 的"可用章节"列表和讲义标题上，
+        # 主人看到的就是一个叫 __root__ 的章节。
+        key = tuple(b.section_path) if b.section_path else (_ROOT_LABEL,)
         if key not in box:
             box[key] = Section(title=key[-1], path=list(key),
                                page_start=b.page, page_end=b.page)

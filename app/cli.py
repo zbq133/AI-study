@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .llm import LLM
-from .pdf import extract_ir
+from .pdf import NoTextLayer, extract_ir
 from .pipeline import build_lesson
 from .schema import build_sections
 
@@ -22,13 +22,24 @@ def main() -> int:
     pdf_path, chapter = sys.argv[1], sys.argv[2]
     n = int(sys.argv[3]) if len(sys.argv) > 3 else 5
 
-    ir = extract_ir(pdf_path)
+    try:
+        ir = extract_ir(pdf_path)
+    except NoTextLayer as exc:
+        print(f"解析失败：{exc}")
+        return 4
     print(f"解析完成：{ir.page_count} 页 / {len(ir.blocks)} 个块")
 
     secs = build_sections(ir)
-    print("可用章节（前 20 条）：")
-    for s in secs[:20]:
-        print("   ", " > ".join(s.path), f"p{s.page_start}-{s.page_end}")
+    print(f"可用章节（共 {len(secs)} 条，前 20 条）：")
+    for i, s in enumerate(secs[:20], 1):
+        print(f"  {i:>2}. {' > '.join(s.path)}  p{s.page_start}-{s.page_end}")
+
+    if chapter.isdigit():                      # 允许直接写列表里的序号
+        idx = int(chapter)
+        if not 1 <= idx <= len(secs):
+            print(f"\n序号 {idx} 超出范围 1-{len(secs)}。")
+            return 5
+        chapter = secs[idx - 1].title
 
     missing = [k for k in REQUIRED if not os.environ.get(k)]
     if missing:
@@ -38,7 +49,11 @@ def main() -> int:
 
     llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"],
               os.environ["LLM_MODEL"])
-    lesson = build_lesson(llm, ir, chapter, n)
+    try:
+        lesson = build_lesson(llm, ir, chapter, n)
+    except ValueError as exc:
+        print(f"\n{exc}")
+        return 5
 
     out = Path("out") / f"{Path(pdf_path).stem}_{chapter}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

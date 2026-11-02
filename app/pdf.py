@@ -7,11 +7,33 @@ from pathlib import Path
 
 import fitz
 
-from .schema import Block, DocIR, normalize
+from .schema import Block, DocIR
 
 HEAD_NUM = re.compile(
     r"^(第[一二三四五六七八九十百0-9]+[章节讲篇部]|\d+(\.\d+){0,3}[\s、.]|[一二三四五六七八九十]+、)"
 )
+
+
+class NoTextLayer(RuntimeError):
+    """整份 PDF 提不出任何文字行（扫描件、图片型课件，或文字被做了轮廓化）。
+
+    以前这种情况会一路返回空 IR：0 块 → 0 章节 → CLI 打印一张空表还退出 0，
+    看上去像"解析成功但文件没内容"，排查方向全被带偏。
+    """
+
+
+_TOC_PUNCT = re.compile(r"[\s．.。、,，:：;；\-—_()（）\[\]【】/／]+")
+
+
+def _toc_key(t: str) -> str:
+    """TOC 条目与正文标题的比对键：忽略空白，以及编号后的点号差异。
+
+    出版方的书签常写 "1 Introduction"、"10.1 Heat treatment in air"，
+    正文却是 "1. Introduction"、"10.1. Heat treatment in air"。
+    原来只调 normalize（只去空白）→ 整份 TOC 一条也命中不了，
+    层级全部退化成字号启发式，长标题还会被长度阈值挡掉、章节边界直接丢。
+    """
+    return _TOC_PUNCT.sub("", t or "").lower()
 
 
 def _mode_size(sizes):
@@ -53,10 +75,15 @@ def extract_ir(path) -> DocIR:
     path = Path(path)
     doc = fitz.open(str(path))
     raw = [(i + 1, _page_lines(p), p.rect.width) for i, p in enumerate(doc)]
+    if not any(lines for _, lines, _ in raw):
+        raise NoTextLayer(
+            f"{path.name}：{doc.page_count} 页里没有任何文字层（多半是扫描件或图片型课件）。"
+            "需要先 OCR 成文本层，再交给解析。"
+        )
     base = _mode_size([l[1] for _, lines, _ in raw for l in lines])
 
     toc = [[lvl, title, pno] for lvl, title, pno in (doc.get_toc() or [])]
-    toc_map = {normalize(t): (lvl, t) for lvl, t, _ in toc}
+    toc_map = {_toc_key(t): (lvl, t) for lvl, t, _ in toc}
 
     blocks = []
     stack = []
@@ -67,7 +94,7 @@ def extract_ir(path) -> DocIR:
             clean = text.strip()
             short = len(clean) <= 42
             level = 0
-            hit = toc_map.get(normalize(clean))
+            hit = toc_map.get(_toc_key(clean))
             if hit:
                 level = hit[0]
             elif size >= base * 1.15 and short:

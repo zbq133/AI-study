@@ -40,6 +40,18 @@ def test_select_chapter_returns_subtree_only():
     assert select_chapter(secs, "不存在的章节") == []
 
 
+def test_blocks_before_first_heading_get_readable_label():
+    # 首页页眉/作者信息出现在第一个标题之前：章节名不能再是 "__root__"
+    ir = make_ir()
+    ir.blocks.insert(0, Block(id="b0", kind="para", text="页眉信息", page=1,
+                              section_path=[]))
+    secs = build_sections(ir)
+    assert secs[0].path == ["（正文前）"]
+    assert secs[0].title == "（正文前）"
+    assert secs[0].block_ids == ["b0"]
+    assert "__root__" not in [s.title for s in secs]
+
+
 def test_verify_refs_drops_hallucination():
     page_text = {2: "基本概念的正文。这里还有一句可以逐字引用的长句子。"}
     good = SourceRef(page=2, quote="可以逐字引用的长句子")
