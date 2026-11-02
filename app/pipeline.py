@@ -14,6 +14,20 @@ def _render(sections):
     return "\n".join(s.text for s in sections)[:MAX_CHARS]
 
 
+def _render_sources(ir, sections, limit=MAX_CHARS):
+    """把本章原文带页码渲染出来。
+
+    出题阶段原来只把讲义喂给模型，却要求 source_ref 给"原文逐字 quote" ——
+    它根本没看见原文，只能凭记忆改写一句塞进去。真跑一次就露馅了：三题都给了
+    出处，三题逐字校验全落空，引用是模型自己润色过的句子，页码也是编的。
+    """
+    pages = set()
+    for s in sections:
+        pages.update(range(s.page_start, s.page_end + 1))
+    lines = [f"[p{b.page}] {b.text}" for b in ir.blocks if b.page in pages]
+    return "\n".join(lines)[:limit]
+
+
 def plan_outline(llm, chapter, sections):
     return llm.json(OUTLINE_SYS,
                     OUTLINE_USER.format(chapter=chapter, text=_render(sections)),
@@ -80,7 +94,7 @@ def _solve_independently(llm, q) -> bool:
     return mapped == target
 
 
-def make_quiz(llm, lessons, n, page_text, blocks=None):
+def make_quiz(llm, lessons, n, page_text, blocks=None, source=""):
     body = "\n\n".join(
         f"### {l.title}\n{l.explanation_md}\n易错点：{'；'.join(l.pitfalls)}"
         for l in lessons)[:MAX_CHARS]
@@ -92,7 +106,8 @@ def make_quiz(llm, lessons, n, page_text, blocks=None):
         if asked <= 0:
             break
         pack = llm.json(QUIZ_SYS,
-                        QUIZ_USER.format(n=asked, k=max(3, asked // 2), text=body),
+                        QUIZ_USER.format(n=asked, k=max(3, asked // 2),
+                                         text=body, source=source),
                         QuizPack, temperature=0.5)
         before = len(kept)
         for q in pack.items:
@@ -108,6 +123,9 @@ def make_quiz(llm, lessons, n, page_text, blocks=None):
                 continue
             if not verify_refs([q.source_ref], page_text, blocks):
                 continue
+            # 校验过了再把摘录里的换行压平：OCR 的行是断开的，逐字通过的 quote
+            # 常常长这样「电磁波的传播可\n不需介质」，存进讲义很难看。
+            q.source_ref.quote = " ".join(q.source_ref.quote.split())
             q.verified = _solve_independently(llm, q)
             if q.verified:
                 kept.append(q)
@@ -127,7 +145,8 @@ def build_lesson(llm, ir, chapter, n_quiz=5):
     outline = plan_outline(llm, chapter, sections)
     lessons = [write_section(llm, chapter, it, sections, ptext, blocks)
                for it in outline.sections]
-    quiz = make_quiz(llm, lessons, n_quiz, ptext, blocks)
+    quiz = make_quiz(llm, lessons, n_quiz, ptext, blocks,
+                     source=_render_sources(ir, sections))
 
     return Lesson(
         chapter=chapter,

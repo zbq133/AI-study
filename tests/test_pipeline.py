@@ -1,6 +1,6 @@
-from app.pipeline import _solve_independently, build_lesson
+from app.pipeline import _render_sources, _solve_independently, build_lesson
 from app.schema import (Block, DocIR, LessonSection, Outline, OutlineItem,
-                        QuizItem, QuizPack, SourceRef, VerifyResult)
+                        QuizItem, QuizPack, SourceRef, VerifyResult, build_sections)
 
 QUOTE = "这是一句可以在原文里逐字找到的句子"
 FAKE = "这句话在原文里根本不存在"
@@ -13,6 +13,7 @@ class FakeLLM:
         self.calls = 0
         self.blind_to = blind_to
         self.verify_orders = []
+        self.quiz_prompts = []
 
     def json(self, system, user, model_cls, temperature=0.3, retries=2):
         self.calls += 1
@@ -25,6 +26,7 @@ class FakeLLM:
                                  source_refs=[SourceRef(page=1, quote=QUOTE),
                                               SourceRef(page=1, quote=FAKE)])
         if name == "QuizPack":
+            self.quiz_prompts.append(user)
             return QuizPack(items=[
                 QuizItem(type="single", stem="好题：下列说法正确的是？",
                          options=["甲", "乙", "丙", "丁"], answer="B",
@@ -60,7 +62,35 @@ def test_build_lesson_drops_fake_refs_and_bad_quiz():
     assert lesson.quiz[0].verified is True
 
 
-def test_quiz_retry_does_not_duplicate_items():
+def test_quiz_prompt_carries_source_with_page_numbers():
+    """出题时原文必须喂进去。
+
+    真跑时三题都给了 source_ref、三题逐字校验全落空：模型被要求"引用原文"，
+    但 prompt 里只有讲义，它只能凭记忆把那句话重写一遍再填进去，页码也是编的。
+    """
+    llm = FakeLLM()
+    build_lesson(llm, make_ir(), "第1章", n_quiz=2)
+    assert llm.quiz_prompts
+    prompt = llm.quiz_prompts[0]
+    assert "[p1]" in prompt
+    assert QUOTE in prompt
+
+
+def test_render_sources_covers_only_the_chapter_pages():
+    ir = DocIR(doc_id="d1", filename="t.pdf", page_count=2, blocks=[
+        Block(id="b1", kind="heading", text="第1章 绪论", page=1, level=1,
+              section_path=["第1章 绪论"]),
+        Block(id="b2", kind="para", text="第一章的正文", page=1, section_path=["第1章 绪论"]),
+        Block(id="b3", kind="heading", text="第2章 收尾", page=2, level=1,
+              section_path=["第2章 收尾"]),
+        Block(id="b4", kind="para", text="第二章的正文", page=2, section_path=["第2章 收尾"])])
+    first = [s for s in build_sections(ir) if s.page_start == 1]
+    text = _render_sources(ir, first)
+    assert "[p1] 第一章的正文" in text
+    assert "第二章的正文" not in text
+
+
+
     lesson = build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=5)
     stems = [q.stem for q in lesson.quiz]
     assert len(stems) == len(set(stems))

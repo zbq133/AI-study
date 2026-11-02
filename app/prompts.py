@@ -35,11 +35,17 @@ QUIZ_SYS = """你是出题老师。基于给定讲义出题，只考讲义里讲
 - 干扰项必须来自学生的常见误解。
 - answer 只能是选项字母，多选用字母序列如 "AC"。
 - 每题必须标 knowledge_point，并给 source_ref（page + 原文逐字 quote 6 字以上）。
+- source_ref.quote 只能从【原文】里逐字复制连续片段：一个字都不许改，不许改标点，
+  不许把两行原文拼成一句时插字，也不许用讲义里的话顶替原文。抄不出逐字片段就换一道题。
+- source_ref.page 填该片段在【原文】里的页码前缀。
 只输出 JSON：{"items":[{"type":"single","stem":"...","options":["...","..."],"answer":"B","explanation":"...","difficulty":2,"knowledge_point":"...","source_ref":{"page":12,"quote":"逐字片段"}}]}"""
 
 QUIZ_USER = """需要 {n} 道题，覆盖至少 {k} 个不同知识点，难度按 3:5:2。
-讲义内容：
-{text}"""
+【讲义】用来决定考什么，但不能当出处的依据：
+{text}
+
+【原文】source_ref.quote 只能从这里逐字复制（每行前缀是页码）：
+{source}"""
 
 
 VERIFY_SYS = """你是独立解题的学生。只看题目本身作答，不要参考任何讲义或答案。
