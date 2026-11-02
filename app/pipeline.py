@@ -10,8 +10,26 @@ from .schema import (DocIR, Lesson, LessonSection, Outline, QuizItem, QuizPack,
 MAX_CHARS = 18000
 
 
+def _clip(text: str, limit: int = MAX_CHARS) -> str:
+    """按行边界截断，不切在句子中间。
+
+    `text[:18000]` 会切在半句话上，模型看见半句就顺着把后半句补完 —— 补出来的
+    还带着原文的语气，最容易被当成材料本身。
+    """
+    if len(text) <= limit:
+        return text
+    out, used = [], 0
+    for line in text.splitlines():
+        if used + len(line) + 1 > limit:
+            break
+        out.append(line)
+        used += len(line) + 1
+    # 一行都放不下（单行超长）时才退回硬截，否则整节没素材比截半句更糟
+    return "\n".join(out) if out else text[:limit]
+
+
 def _render(sections):
-    return "\n".join(s.text for s in sections)[:MAX_CHARS]
+    return _clip("\n".join(s.text for s in sections))
 
 
 def _render_sources(ir, sections, limit=MAX_CHARS):
@@ -25,7 +43,7 @@ def _render_sources(ir, sections, limit=MAX_CHARS):
     for s in sections:
         pages.update(range(s.page_start, s.page_end + 1))
     lines = [f"[p{b.page}] {b.text}" for b in ir.blocks if b.page in pages]
-    return "\n".join(lines)[:limit]
+    return _clip("\n".join(lines), limit)
 
 
 def plan_outline(llm, chapter, sections):

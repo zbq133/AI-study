@@ -1,5 +1,15 @@
 from app.schema import (Block, DocIR, SourceRef, build_sections, extract_answer,
-                        normalize, select_chapter, verify_refs)
+                        is_reference_title, normalize, select_chapter, verify_refs)
+
+
+def test_is_reference_title_matches_common_spellings():
+    """参考文献常吃掉全文四成篇幅，不该出现在"可用章节"里让人误选。"""
+    assert is_reference_title("References")
+    assert is_reference_title("REFERENCES")
+    assert is_reference_title("参考文献")
+    assert is_reference_title(" Bibliography ")
+    assert not is_reference_title("12. Summary and recommendations")
+    assert not is_reference_title("10. Heat treatment")
 
 
 def make_ir():

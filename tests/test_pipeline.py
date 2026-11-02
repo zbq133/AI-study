@@ -1,4 +1,4 @@
-from app.pipeline import _render_sources, _solve_independently, build_lesson
+from app.pipeline import _clip, _render_sources, _solve_independently, build_lesson
 from app.schema import (Block, DocIR, LessonSection, Outline, OutlineItem,
                         QuizItem, QuizPack, SourceRef, VerifyResult, build_sections)
 
@@ -90,7 +90,20 @@ def test_render_sources_covers_only_the_chapter_pages():
     assert "第二章的正文" not in text
 
 
+def test_clip_breaks_on_line_boundary():
+    """18000 字硬截会切在半句话上，模型顺着把后半句补完，补出来的还是原文的语气。"""
+    text = "甲" * 10 + "\n" + "乙" * 10 + "\n" + "丙" * 10
+    out = _clip(text, 22)
+    assert out == "甲" * 10 + "\n" + "乙" * 10
+    assert "丙" not in out
 
+
+def test_clip_keeps_one_long_line_rather_than_nothing():
+    """单行超长时宁可硬切，也不能返回空 —— 空素材会让整节没有东西可用。"""
+    assert _clip("丁" * 50, 20) == "丁" * 20
+
+
+def test_quiz_retry_does_not_duplicate_items():
     lesson = build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=5)
     stems = [q.stem for q in lesson.quiz]
     assert len(stems) == len(set(stems))

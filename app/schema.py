@@ -166,6 +166,19 @@ def select_chapter(sections: list[Section], query: str) -> list[Section]:
     return out
 
 
+_REFERENCE_TITLES = frozenset({"references", "reference", "bibliography",
+                               "参考文献", "引用文献", "参考书目"})
+
+
+def is_reference_title(title: str) -> bool:
+    """这一节是不是参考文献列表。
+
+    参考文献常吃掉全文三到四成篇幅（那份 15 页综述里 35392 字，占 40%），
+    既不该出现在"可用章节"里让人误选，也不该占用素材预算。
+    """
+    return normalize(title).lower() in _REFERENCE_TITLES
+
+
 def _reading_order_ok(needle: str, blocks: list[Block]) -> bool:
     """quote 必须落在阅读顺序连续的若干行里。
 

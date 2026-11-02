@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from .llm import LLM
 from .pdf import NoTextLayer, extract_ir
 from .pipeline import build_lesson
-from .schema import build_sections
+from .schema import build_sections, is_reference_title
 
 load_dotenv()
 REQUIRED = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
@@ -30,9 +30,13 @@ def main() -> int:
     print(f"解析完成：{ir.page_count} 页 / {len(ir.blocks)} 个块")
 
     secs = build_sections(ir)
-    print(f"可用章节（共 {len(secs)} 条，前 20 条）：")
-    for i, s in enumerate(secs[:20], 1):
+    shown = [(i, s) for i, s in enumerate(secs, 1) if not is_reference_title(s.title)]
+    print(f"可用章节（共 {len(shown)} 条，前 20 条）：")
+    for i, s in shown[:20]:
         print(f"  {i:>2}. {' > '.join(s.path)}  p{s.page_start}-{s.page_end}")
+    skipped = len(secs) - len(shown)
+    if skipped:
+        print(f"  （另有 {skipped} 条参考文献段已隐藏，序号仍是它在全书里的位置）")
 
     if chapter.isdigit():                      # 允许直接写列表里的序号
         idx = int(chapter)
