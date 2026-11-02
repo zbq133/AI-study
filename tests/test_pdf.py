@@ -2,6 +2,7 @@ import fitz
 import pytest
 
 from app.pdf import NoTextLayer, _plausible_title, _toc_key, extract_ir, page_text_map
+from app.schema import build_sections
 
 
 @pytest.fixture()
@@ -103,10 +104,12 @@ def test_ocr_fills_text_layer_of_image_only_pdf(tmp_path):
     assert len(heads) == 1 and heads[0].level == 1
 
 
-def test_ocr_page_gets_its_own_section(tmp_path, monkeypatch):
-    # OCR 页的几何信息不可靠（框高由文字高度推出来，字号全是估的），
-    # 套教材章节那套启发式会把正文行也判成标题。规则改成：每页自己成章，
-    # 页首确实像标题就用它，否则用"第 N 页"兜底。
+def test_ocr_pages_join_into_one_chapter(tmp_path, monkeypatch):
+    """教材书按章切，PPT 课件要整本并成一章。
+
+    一页 PPT 只有几十上百字。按页切会让模型拿两百字讲一节课，它只能拿自己
+    的知识补 —— 讲义看着漂亮，却跟这份材料无关，source_refs 也就名存实亡。
+    """
     import app.ocr
 
     path = tmp_path / "slides.pdf"
@@ -128,10 +131,37 @@ def test_ocr_page_gets_its_own_section(tmp_path, monkeypatch):
     ir = extract_ir(path, ocr_cache=None)
     assert ir.ocr_pages == [1, 2]
     heads = [b.text for b in ir.blocks if b.kind == "heading"]
-    assert heads == ["横波与纵波", "第 2 页"]
-    # 第二页的正文要挂在它自己的"第 2 页"下面，不能串到第一页标题下
-    last = [b for b in ir.blocks if b.page == 2 and b.kind == "para"]
-    assert last and last[0].section_path == ["第 2 页"]
+    assert heads == ["slides"]              # 整本没有章标题时用文件名兜底
+    secs = build_sections(ir)
+    assert len(secs) == 1
+    assert (secs[0].page_start, secs[0].page_end) == (1, 2)
+
+
+def test_ocr_chapter_heading_splits_chapters(tmp_path, monkeypatch):
+    """真课件第一页写着"第十章 波动"，那就是章界。"""
+    import app.ocr
+
+    path = tmp_path / "slides.pdf"
+    doc = fitz.open()
+    doc.new_page(width=400, height=300)
+    doc.new_page(width=400, height=300)
+    doc.save(str(path))
+    doc.close()
+
+    monkeypatch.setattr("app.pdf._page_lines", lambda page: [])
+
+    def fake_ocr(page, doc_id, pno, cache_dir=None, dpi=200):
+        if pno == 1:
+            return [("第十章 波动", 26.0, False, (10.0, 10.0, 300.0, 50.0))]
+        return [("教学基本要求", 18.0, False, (10.0, 10.0, 200.0, 40.0))]
+
+    monkeypatch.setattr(app.ocr, "ocr_page_cached", fake_ocr)
+
+    ir = extract_ir(path, ocr_cache=None)
+    heads = [b.text for b in ir.blocks if b.kind == "heading"]
+    # p1 的"第十章 波动"开章；p2 的"教学基本要求"只是正文，不再切一章
+    assert heads == ["第十章 波动"]
+    assert len(build_sections(ir)) == 1
 
 
 def test_plausible_title_filters_ocr_noise():

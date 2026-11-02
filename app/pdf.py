@@ -27,6 +27,13 @@ _TOC_PUNCT = re.compile(r"[\s．.。、,，:：;；\-—_()（）\[\]【】/／]
 #: 节号前缀。出版方常用 "§10.1 机械波" 表示节，而且后面常常不跟空格。
 _SECTION_NO = re.compile(r"^§+\s*\d")
 
+#: 章级标题。PPT 课件的分章痕迹只有这一种，其余（§节号、栏目名、示意图标签）
+#: 都不该把一个 PDF 切碎 —— 切碎了每章的素材还不够讲一节。
+_CHAPTER_TITLE = re.compile(
+    r"^(第\s*[0-9一二三四五六七八九十百千]+\s*[章讲部篇]"
+    r"|Chapter\s*\d+|CHAPTER\s*\d+|Lecture\s*\d+)"
+)
+
 _TITLE_MAX_CHARS = 42
 _SENTENCE_END = ("。", ".", "，", ",", "；", ";", "：", ":")
 _MIN_TITLE_AR = 2.5
@@ -143,52 +150,41 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
     toc_map = {_toc_key(t): (lvl, t) for lvl, t, _ in toc}
 
     ocr_set = set(ocr_pages)
+    pages = [(pno, _order(lines, page_w), page_w, page_h)
+             for pno, lines, page_w, page_h in raw]
+    first_ocr = min(ocr_set) if ocr_set else None
+    # 整本课件连一个"第X章"都没有时，合成一个用文件名当章名，否则所有块
+    # 都会落进「（正文前）」那节里。
+    ocr_named = any(
+        _CHAPTER_TITLE.match(t.strip())
+        for pno, ordered, _, _ in pages if pno in ocr_set
+        for t, *_ in ordered
+    )
     blocks = []
     stack = []
     bid = 0
-    for pno, lines, page_w, page_h in raw:
-        ordered = _order(lines, page_w)
-        named = False
-        if pno in ocr_set:
-            # OCR 页的几何信息不可靠：框高是文字高度推出来的，字号全是估的，
-            # 套教材章节那套"字号大于正文就叫标题"只会产出一堆伪标题
-            # （竖排侧栏标签、示意图里的"波源""介质"、公式碎片）。
-            # PPT 的语义单元本来就是"一页"：让每页自己成章，
-            # 页首那一行如果确实像标题就用它，否则用"第 N 页"。
-            head = ordered[0] if ordered else None
-            head_text = head[0].strip() if head else ""
-            # 页首那行带冒号的，多半是"标题：正文"被 OCR 并成了一行（标题自己
-            # 很少带冒号），这种宁可退回"第 N 页"，也别把半句正文当章节名。
-            named = bool(head) and bool(
-                _SECTION_NO.match(head_text)
-                or (
-                    "：" not in head_text
-                    and ":" not in head_text
-                    and _plausible_title(head_text, _aspect(head[3]))
-                    and head[3][1] < page_h * 0.35
-                )
-            )
-            if not named:
-                stack.clear()
-                bid += 1
-                label = f"第 {pno} 页"
-                stack.append((1, label))
-                blocks.append(
-                    Block(id=f"b{bid}", kind="heading", text=label, page=pno,
-                          level=1, section_path=[label])
-                )
+    for pno, ordered, page_w, page_h in pages:
+        if pno in ocr_set and pno == first_ocr and not ocr_named:
+            bid += 1
+            label = path.stem
+            stack.clear()
+            stack.append((1, label))
+            blocks.append(Block(id=f"b{bid}", kind="heading", text=label, page=pno,
+                                level=1, section_path=[label]))
 
-        for idx, (text, size, bold, bbox) in enumerate(ordered):
+        for text, size, bold, bbox in ordered:
             bid += 1
             clean = text.strip()
             ar = _aspect(bbox)
             level = 0
             hit = toc_map.get(_toc_key(clean))
             if pno in ocr_set:
-                if _SECTION_NO.match(clean):
-                    level = 1
-                elif idx == 0 and named:
-                    level = 1
+                # PPT 课件和教材书是两种输入：书一页几百字、一章几十页；PPT 一页
+                # 五十个字，整本才够讲一节。上一版按"一页一章"切，于是模型要拿
+                # 246 字讲一节课，只能拿自己脑子里的知识填 —— 内容是对的，但不
+                # 是从这份材料读出来的，source_refs 也就名存实亡。
+                # 所以 OCR 页只认"第X章"这类章级标题，其余全部并进当前章。
+                level = 1 if _CHAPTER_TITLE.match(clean) else 0
             elif hit:
                 level = hit[0]
             elif _SECTION_NO.match(clean) and _plausible_title(clean, ar):
