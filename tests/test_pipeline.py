@@ -1,4 +1,5 @@
-from app.pipeline import _clip, _render_sources, _solve_independently, build_lesson
+from app.pipeline import (_bullets, _clip, _render_sources, _solve_independently,
+                          build_lesson)
 from app.schema import (Block, DocIR, LessonSection, Outline, OutlineItem,
                         QuizItem, QuizPack, SourceRef, VerifyResult, build_sections)
 
@@ -179,9 +180,27 @@ def test_fill_item_compares_text_not_letters():
 
 def test_build_lesson_summary_fields():
     lesson = build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=2)
-    assert lesson.summary_one_liner == "关键点1"
+    assert lesson.summary_one_liner == "本章分 1 块讲：知识点A。"
     assert lesson.summary_bullets == ["关键点1"]
     assert lesson.learning_objectives == ["考点1"]
+
+
+def test_bullets_drop_duplicates_and_cap_per_section():
+    a = LessonSection(title="A", explanation_md="x", key_points=["同一句。", "第二条"],
+                      pitfalls=[], source_refs=[])
+    b = LessonSection(title="B", explanation_md="y",
+                      key_points=["同一句", "第三条", "第四条", "第五条"],
+                      pitfalls=[], source_refs=[])
+    # "同一句" 换个标点也算重复被丢掉；每节只留 2 条，所以 B 的"第五条"进不来
+    assert _bullets([a, b]) == ["同一句。", "第二条", "第三条", "第四条"]
+
+
+def test_bullets_stop_at_the_limit():
+    a = LessonSection(title="A", explanation_md="x", key_points=["一", "二"],
+                      pitfalls=[], source_refs=[])
+    b = LessonSection(title="B", explanation_md="y", key_points=["三", "四"],
+                      pitfalls=[], source_refs=[])
+    assert _bullets([a, b], limit=3) == ["一", "二", "三"]
 
 
 def test_build_lesson_unknown_chapter_raises():

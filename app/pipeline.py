@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from .pdf import page_block_map, page_text_map
 from .prompts import (OUTLINE_SYS, OUTLINE_USER, QUIZ_SYS, QUIZ_USER,
                       SECTION_SYS, SECTION_USER, VERIFY_SYS, VERIFY_USER)
@@ -8,6 +10,14 @@ from .schema import (DocIR, Lesson, LessonSection, Outline, QuizItem, QuizPack,
                      normalize, select_chapter, verify_refs)
 
 MAX_CHARS = 18000
+
+# 同一句结论两次写出来，差别常常只在句号、逗号和空格上（"同一句。" / "同一句"），
+# 所以去重前把这些全丢掉再看。
+_DE_DUP = re.compile(r"[\s\u3000。，、；：！？,.．;:!?\"'“”‘’()（）\[\]【】]+")
+
+
+def _dedup_key(text: str) -> str:
+    return _DE_DUP.sub("", text or "").lower()
 
 
 def _clip(text: str, limit: int = MAX_CHARS) -> str:
@@ -153,6 +163,42 @@ def make_quiz(llm, lessons, n, page_text, blocks=None, source=""):
     return kept[:n]
 
 
+def _one_liner(chapter, outline) -> str:
+    """一句话交代这一章分几块、讲的什么。
+
+    原来是拿第一节的第一条要点顶替，结果和 summary_bullets 的第一条一字不差，
+    同一句话在讲义开头和结尾各出现一次。改成列结构，读者一眼看到整章骨架。
+    """
+    titles = [it.title.strip() for it in outline.sections if it.title.strip()]
+    if not titles:
+        return chapter
+    return f"本章分 {len(titles)} 块讲：{'、'.join(titles)}。"
+
+
+def _bullets(lessons, limit: int = 10) -> list[str]:
+    """各节关键论断，去重后取前 limit 条。
+
+    同一句结论常被相邻两节各写一遍（换介质那段在第 5、6 条几乎一字不差），
+    所以按 _dedup_key 比，标点和空格不同也算同一句；每节最多留 2 条，免得
+    一节把整页占满。
+    """
+    out, seen = [], set()
+    for lesson in lessons:
+        kept = 0
+        for point in lesson.key_points:
+            if kept >= 2 or len(out) >= limit:
+                break
+            key = _dedup_key(point)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(point)
+            kept += 1
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
 def build_lesson(llm, ir, chapter, n_quiz=5):
     ptext = page_text_map(ir)
     blocks = page_block_map(ir)
@@ -170,8 +216,7 @@ def build_lesson(llm, ir, chapter, n_quiz=5):
         chapter=chapter,
         learning_objectives=[p for it in outline.sections for p in it.points][:8],
         sections=lessons,
-        summary_one_liner=(lessons[0].key_points[0]
-                           if lessons and lessons[0].key_points else ""),
-        summary_bullets=[k for l in lessons for k in l.key_points][:10],
+        summary_one_liner=_one_liner(chapter, outline),
+        summary_bullets=_bullets(lessons),
         quiz=quiz,
     )
