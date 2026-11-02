@@ -210,18 +210,35 @@ def _bullets(lessons, limit: int = 10) -> list[str]:
     return out[:limit]
 
 
-def build_lesson(llm, ir, chapter, n_quiz=5):
+def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None):
+    """跑完整条流水线。
+
+    on_step 每推进一格调一次，收到 {"stage": ..., ...}：outline / section /
+    quiz / done。命令行不传；Web 那边拿它推进度条 —— 一次生成几十秒、十几
+    次模型调用，中间什么都不显示的话，人只会以为卡死了。
+    """
+
+    def step(**info):
+        if on_step is not None:
+            on_step(info)
+
     ptext = page_text_map(ir)
     blocks = page_block_map(ir)
     sections = select_chapter(build_sections(ir), chapter)
     if not sections:
         raise ValueError(f"没找到章节：{chapter}（先看 extract_ir 打印的可用章节）")
 
+    step(stage="outline")
     outline = plan_outline(llm, chapter, sections)
-    lessons = [write_section(llm, chapter, it, sections, ptext, blocks)
-               for it in outline.sections]
+    total = len(outline.sections)
+    lessons = []
+    for i, item in enumerate(outline.sections, 1):
+        step(stage="section", index=i, total=total, title=item.title)
+        lessons.append(write_section(llm, chapter, item, sections, ptext, blocks))
+    step(stage="quiz")
     quiz = make_quiz(llm, lessons, n_quiz, ptext, blocks,
                      source=_render_sources(ir, sections))
+    step(stage="done")
 
     return Lesson(
         chapter=chapter,

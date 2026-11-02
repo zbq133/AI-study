@@ -5,6 +5,10 @@ python-dotenv>=1.0
 pytest>=8.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
+# 上传接口收 multipart，少了它 FastAPI 直接 500。
+python-multipart>=0.0.9
+# 只用给 TestClient 用（跑测试时自己起一个应用实例）。
+httpx>=0.27
 # 图片型课件（PPT 导出的整页图）的文字层兜底。
 # 它依赖 onnxruntime，而 onnxruntime 还没有 Python 3.15 的轮子——
 # 项目环境请用 3.12/3.13，用 3.15 建 venv 会直接装不上。
