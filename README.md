@@ -17,7 +17,27 @@
 > `ResolutionImpossible`。3.12 / 3.13 都能装。macOS / Linux 把 `.venv\Scripts\python.exe`
 > 换成 `.venv/bin/python` 即可。
 
-## 用网页
+## 用客户端（不碰浏览器）
+
+    .\.venv\Scripts\python.exe -m app.desktop
+
+双击就是一扇窗口：没有地址栏、没有标签页，关掉窗口进程就退。它做的事很简单 —— 在后台把
+本地服务起在那个端口上，然后开一个 Windows 原生窗口（WebView2）指过去。
+
+- 再双击一次不会起第二份服务：端口上已经有本程序在跑就只开窗口，复用那份数据。
+- 端口被别的程序占着就自动换一个空闲的，不用你操心。
+- 主题 / 字号 / 折叠状态存在 `~/.ai-study/webview`（普通浏览器是它自己的 localStorage），
+  所以客户端和网页版的界面偏好是分开的两套。
+- 讲义里的文字可以选中复制。
+
+**打成 exe 发给别人**：
+
+    powershell -ExecutionPolicy Bypass -File build_desktop.ps1
+    # → dist\AI Study\AI Study.exe（连目录一起拷；数据在 exe 旁边生成）
+
+用目录版（onedir）而不是单文件：这程序带着 onnxruntime 和 PyMuPDF，单文件版每次启动都要先解
+几百 MB 到临时目录，冷启动十几秒，杀毒软件还会盯着解压动作。目录版是秒开。
+
 
     .\start.ps1            # Windows；macOS / Linux 用 ./start.sh
 
@@ -67,7 +87,7 @@
 
     .\.venv\Scripts\python.exe -m pytest -q
 
-184 条通过 + 3 条跳过，全部离线（模型用假桩）。覆盖解析、章节切分、引用校验、生成管线、
+197 条通过 + 3 条跳过，全部离线（模型用假桩）。覆盖解析、章节切分、引用校验、生成管线、
 Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取消。
 真模型的回归要手动开：`STUDY_LIVE=1` + 有 key 时 `tests/test_live.py` 才会跑真实链路（会花钱）。
 
@@ -86,7 +106,7 @@ Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取�
       serve.py      FastAPI（上传、解析、布局、生成、SSE 进度、历史、设置、探活）
       cli.py        命令行入口
       web/          三栏界面（原生 DOM，无构建链）+ grade.js + vendor/katex
-    tests/          184 passed + 3 skipped
+    tests/          197 passed + 3 skipped（共 200 条）
     docs/
       ROADMAP.md    现状、硬约束、完整计划、已知问题、接下来做什么
       DECISIONS.md  为什么这么做（每条都带踩过的坑）

@@ -23,7 +23,7 @@
 | 项 | 状态 |
 |---|---|
 | 代码 | `app/` 12 个 Python 模块 **2164 行** + `app/web/` 四个文件 **1195 行**（另含本地 KaTeX 548 KB）+ `tests/` 11 个文件 **2160 行** |
-| 测试 | **184 passed + 3 skipped**（共 187 条；skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
+| 测试 | **197 passed + 3 skipped**（共 200 条；skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
 | HTTP 端点 | **17 个**（见 §7） |
 | 后端内核 | **约 95%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过；错误分类、取消、成本闸、历史索引都已就位 |
 | 外壳 | **约 90%**：CLI + 本地 Web 服务 + 探活 + 日志 + 一键启动脚本 |
@@ -84,7 +84,8 @@ PDF ──extract_ir──> DocIR ──build_sections──> [Section] ──se
 | `app/pipeline.py` | `build_lesson(llm, ir, chapter, n_quiz=5, on_step=None)` | 全流程编排 |
 | `app/prompts.py` | `OUTLINE_SYS` / SECTION_SYS / QUIZ_SYS / VERIFY_SYS | 提示词 |
 | `app/llm.py` | `LLM.json(system, user, model_cls, ...)` | OpenAI 兼容客户端，JSON 校验失败自动修复重试 |
-| `app/serve.py` | `app`（FastAPI） | 本地 Web 服务 |
+| `app/serve.py` | `app`（FastAPI） | 本地 Web 服务（17 个端点） |
+| `app/desktop.py` | `run()` / `main(argv)` | 客户端外壳：后台起 uvicorn，pywebview 开原生窗口；8765 上已有本程序就复用 |
 
 **数据模型要点**（`app/schema.py`）：
 
@@ -453,6 +454,34 @@ def _check(self):
 - Anki 卡（题干 + 答案 + 出处，`csv` 分号分隔）
 - PDF（前端已渲染的话直接打印样式）
 
+#### P1-10 客户端版（不碰浏览器）✅（2026-11-03 已做）
+
+网页版还是网页版，外面套一层原生窗口：`app/desktop.py` 在后台线程里起 uvicorn，再用
+**pywebview**（Windows 上就是系统自带的 WebView2）开一个 1360×900 的窗口指向它。
+
+- **不引 Electron**：项目本来就是 Python，Electron 等于为了一个窗口再拖一套 Node 运行时进来。
+- **端口复用**：先探 8765，`/api/health` 回的对象里同时有 `jobs` 和 `llm` 才认"这是本程序" ——
+  只认 200 不够，别人家服务也可能回 200。认得就复用（不再起第二份），端口空着就用它，
+  被别人占了就临时挑一个。
+- `text_select=True`：讲义要能选中复制，窗口不能是那种选不了字的壳。
+- `private_mode=False` + `storage_path=~/.ai-study/webview`：否则主题、字号档每次重开都丢。
+- **窗口版 exe 没有控制台**：`sys.stdout` 是 `None`，uvicorn 的日志格式器会调 `sys.stdout.isatty()`
+  当场炸掉。`_ensure_streams()` 把空流接到 devnull，并把 `log_config=None` 传给 uvicorn，
+  日志改由 `serve.setup_logging()` 落在 `out/server.log`。
+
+打包（`build_desktop.ps1`，产物 `dist\AI Study\AI Study.exe`，359 MB）：
+
+- **onedir 而不是 onefile**：单文件每次启动都要把几百 MB 解到临时目录，冷启动十几秒，还容易被杀毒盯。
+- `--collect-all pymupdf` 不能省：`import pymupdf` 会激活 `pymupdf.layout`，它要读
+  `pymupdf/layout/resources/onnx/*.yaml`，PyInstaller 默认不收这些数据。
+- `run_desktop.py` 外面包了一层 try/except 写 `crash.log` —— 窗口版出错时屏幕上只有
+  "Unhandled exception in script"，没有这个文件等于闭着眼睛修。
+- **`build_desktop.ps1` 必须存成 UTF-8 带 BOM**：PowerShell 5.1 否则按 GBK 读，中文注释直接解析失败。
+  用编辑器保存一次就会掉 BOM，要补 `b'\xef\xbb\xbf'` 前缀。
+
+数据目录跟着工作目录走：exe 在 `dist\AI Study\` 里跑，`out/`、`uploads/`、`settings.json`
+就生成在那儿。想接着用网页版的历史，把这三样拷到 exe 旁边。
+
 ---
 
 ## 6 · 前端设计建议（重点）
@@ -627,7 +656,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q          # 必须 184 passed, 3 skipped
+.\.venv\Scripts\python.exe -m pytest -q          # 必须 197 passed, 3 skipped
 .\.venv\Scripts\python.exe -m app.serve          # 打开 127.0.0.1:8765 走一遍
 Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去脉
 ```

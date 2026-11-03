@@ -10,3 +10,10 @@ uploads/
 test pdf/
 *.log
 .vscode/
+
+# 打包产物（build_desktop.ps1 生成，359 MB，不进仓库）
+build/
+dist/
+*.spec
+crash.log
+

@@ -360,3 +360,37 @@ CSS 的"类名没有人定义"和"故意不写样式"在浏览器里长得一模
 **6. 删之前 `confirm()` 把话说清楚**：删哪些、连不连 PDF、大概能腾出多少、找不回来。数字从当前列表算，不是"将释放空间"这种空话。
 
 **7. 顺手记一条工具教训**：为了把测试里的 `doc_pdf` 批量换成 `book_pdf`，我用了 `Get-Content -Raw | Set-Content -Encoding utf8` 做整文件往返，PowerShell 5.1 按 GBK 读 UTF-8 中文再写回，整份 `tests/test_serve.py` 变成乱码（`SyntaxError: invalid non-printable character U+E1BC`），只能 `git checkout --` 回滚重做。**中文内容一律用编辑工具改，别让 PowerShell 做文本中转。**
+## 2026-11-03 补记：做成客户端（不碰浏览器）
+
+**1. 为什么是 pywebview 而不是 Electron / Tauri**：程序主体是 Python（FastAPI + uvicorn），前端是原生
+DOM。Electron 等于为了一个窗口再拖一整套 Node 运行时；Tauri 要 Rust 工具链。pywebview 在 Windows 上
+直接用系统自带的 WebView2，`pip install pywebview` 就完事，打包后也只多几 MB。
+
+**2. 服务照样是服务，只是没人手动起**：`desktop.py` 在 daemon 线程里跑 `uvicorn.Server`，窗口指向
+`http://127.0.0.1:<port>`。好处是网页版和客户端版共用同一套接口和同一个 `out/`，坏处是端口要谈：
+先探 8765，**只有 `/api/health` 回的对象里同时有 `jobs` 和 `llm` 才认"这是本程序"** —— 只认 HTTP 200
+不够，别人家的服务也可能回 200。认得就复用，空着就用，被占就临时挑一个。
+
+**3. `text_select=True` 与 `private_mode=False` 都不是可选项**：前者决定讲义能不能选中复制，后者决定
+主题/字号档关掉窗口还在不在。`storage_path` 指到 `~/.ai-study/webview`，别塞进项目目录（会被
+`git status` 看见）。
+
+**4. 窗口版 exe 没有 stdout，uvicorn 会因此死在起服务那一步**：`sys.stdout` 是 `None`，
+日志格式器调 `sys.stdout.isatty()` 抛 `AttributeError: 'NoneType' object has no attribute 'isatty'`，
+外面只看到一句 "Unhandled exception in script"。修法两条一起上：`_ensure_streams()` 把空流接到
+devnull（让 `.isatty()` 调得动），`uvicorn.Config(log_config=None)` 让它干脆别配 formatter，日志
+改由 `serve.setup_logging()` 写 `out/server.log`。
+
+**5. `--collect-all pymupdf` 不能省**：这一版 pymupdf（2.0）`import` 时就会 `activate()` 版面分析，
+去读 `pymupdf/layout/resources/onnx/layout_rf2.4.1+imf1.yaml`；PyInstaller 默认只跟 py 文件，
+打包后一导入就 `FileNotFoundError`。凡是"import 时顺带读资源"的库，都得 `--collect-all`。
+
+**6. 打包用 onedir，不用 onefile**：单文件版每次启动都要把 300+ MB 解到临时目录，冷启动十几秒，
+还容易被杀毒软件盯上；onedir 目录大一点（359 MB），但双击就开。
+
+**7. 先打一个控制台版看真报错**：`--console --distpath distc` 打同名控制台版，跑 `--no-window`
+把 traceback 打全，再回头打窗口版。窗口版的错误信息全靠 `run_desktop.py` 里那个 `crash.log` 兜底。
+
+**8. 脚本文件必须带 BOM**：`build_desktop.ps1` 里有中文，PowerShell 5.1 读无 BOM 的 UTF-8 会按 GBK
+解，直接解析失败。用编辑工具改完一次就掉 BOM，要补 `b'\xef\xbb\xbf'` 前缀。这已经是同一天第三次被
+编码坑到了（前两次：`Set-Content` 往返把测试文件写成乱码、`Out-File -Encoding UTF8` 加 BOM）。

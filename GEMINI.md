@@ -1,6 +1,6 @@
 # GEMINI.md
 
-> 这个项目由一位人类 + 多个模型轮值开发，代码被 **187 条测试**（+3 条默认跳过的真模型回归）锁着。
+> 这个项目由一位人类 + 多个模型轮值开发，代码被 **200 条测试**（+3 条默认跳过的真模型回归）锁着。
 > **接手的第一个动作：读完本文件，再读 `docs/ROADMAP.md`，再动代码。**
 >
 > 本文件是**纪律 + 现状 + 下一棒**；`docs/ROADMAP.md` 是完整交接文档（架构 / 踩过的坑 /
@@ -23,7 +23,7 @@
 | 项 | 数字 |
 |---|---|
 | 代码 | `app/` 12 个模块 **2164 行**；`app/web/` 4 个文件 **1195 行** + 本地 KaTeX 548 KB |
-| 测试 | **184 passed + 3 skipped**（共 187 条，`tests/` 12 个文件） |
+| 测试 | **197 passed + 3 skipped**（共 200 条，`tests/` 13 个文件） |
 | HTTP 端点 | **16 个**（上传 / 解析 / 布局 / 生成 / 取消 / 任务 / SSE / 历史 / 设置 / 探活） |
 | 提交数 | 34 |
 | 完成度 | 单人本机可用 **约 92%**；交给别人长期跑 **约 75%** |
@@ -47,7 +47,7 @@
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q      # 必须 184 passed, 3 skipped
+.\.venv\Scripts\python.exe -m pytest -q      # 必须 197 passed, 3 skipped
 .\.venv\Scripts\python.exe -m app.serve      # → http://127.0.0.1:8765（或直接跑 start.ps1）
 .\.venv\Scripts\python.exe -m app.cli "C:\path\to.pdf" 18 3   # 命令行跑一章，3 道题
 ```
@@ -86,7 +86,7 @@ cd "D:\AI study"
 | 2 | `docs/DECISIONS.md` | 每个决定的来龙去脉（为什么段落要合并、为什么出题要喂原文、为什么 .hide 缺了一下午） |
 | 3 | `app/schema.py` | 数据模型 + 出处校验（`SourceRef.blocks/bbox`、`locate_quote`） |
 | 4 | `app/serve.py` | 16 个端点 + 任务/取消/成本闸/设置，一个文件看完全部外壳 |
-| 5 | `tests/` 里的测试名 | 187 条测试名就是"哪些行为被锁住了"的清单 |
+| 5 | `tests/` 里的测试名 | 200 条测试名就是"哪些行为被锁住了"的清单 |
 
 ---
 
@@ -108,12 +108,14 @@ app/
   errors.py   135  StudyError 家族：kind/title/hint，人看得懂的那种
   settings.py 109  设置优先级 settings.json > 环境变量；永不回明文密钥
   store.py     94  out/index.json 索引：原子写、坏索引当空、file 只取文件名防穿越
-  serve.py    586  FastAPI：16 端点、线程池任务、SSE 进度、日志、探活
+  serve.py    586  FastAPI：17 端点、线程池任务、SSE 进度、日志、探活
+  desktop.py  200  客户端外壳：后台起 uvicorn + pywebview 原生窗口；端口复用/让让位
+                   · _ensure_streams()：窗口版 exe 没有控制台，sys.stdout 是 None
   cli.py       73  命令行入口
 app/web/
   index.html  149 / app.css 234 / app.js 756 / grade.js 56（纯判分函数，node 可直接测）
   vendor/katex/    本地 KaTeX 0.19.1（23 个文件 548 KB，离线可用）
-tests/       2160  184 passed + 3 skipped
+tests/       2854  197 passed + 3 skipped
 ```
 
 数据流：

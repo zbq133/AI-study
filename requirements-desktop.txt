@@ -1,0 +1,8 @@
+# 只有做客户端版才用得上（`python -m app.desktop`）；网页版不需要它。
+-r requirements.txt
+
+# 打包成 exe
+pyinstaller>=6.22
+
+# 生成 app/desktop.ico 时用（已经有 ico 就不需要）
+pillow>=10
