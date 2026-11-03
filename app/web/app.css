@@ -20,6 +20,12 @@ button { padding: 6px 14px; border-radius: 6px; border: 1px solid #2f6fb3;
          background: #1b4d80; color: #e6eef7; font-size: 13px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
 button.ghost { background: transparent; border-color: #2c3541; color: #9aa6b2; }
+
+/* 唯一的显隐开关。**这条规则缺过一阵子**：.hide 在 HTML/JS 里用了十几处
+   （进度条、停按钮、习题的答案解析、再做一次），少这一行它们全都从头显出来 ——
+   最刺眼的就是习题答案在答题前就摆在那儿。改这里要同步跑 tests/test_serve.py 里那条断言。 */
+.hide { display: none !important; }
+
 .meta { font-size: 12px; color: #7c8794; font-variant-numeric: tabular-nums; }
 .err { color: #e06c75; font-size: 13px; white-space: pre-wrap; padding: 0 16px; }
 .err:empty { display: none; }

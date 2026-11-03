@@ -130,6 +130,30 @@ def test_static_is_not_cached(env):
     assert r.headers["cache-control"] == "no-cache"
 
 
+def test_stylesheet_actually_hides_the_hide_class(env):
+    """`.hide` 这条规则缺过一次，后果是习题答案在答题前就显出来了。
+
+    样式表里少了 `.hide { display: none }`，HTML/JS 里所有靠它隐起来的东西
+    （进度条、停按钮、习题的答案解析）全都从头露着 —— 而且不报任何错。
+    所以这里不测"某个元素"的样式，直接盯住这条规则本身。
+    """
+    import re
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    rule = re.search(r"\.hide\s*\{([^}]*)\}", css)
+    assert rule, "app.css 里没有 .hide 规则"
+    assert "display" in rule.group(1) and "none" in rule.group(1), rule.group(1)
+
+
+def test_quiz_hides_answers_until_the_student_answers(env):
+    """答题前不出对策：答案解析和出处都塞在 .qans 里，初始必须带 hide。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    assert 'class="qans hide"' in js
+    # 判分或点「看答案」之后才把 hide 摘掉
+    assert ".qans').classList.remove('hide')" in js
+
+
 def test_static_type_does_not_depend_on_the_os_guess(env, monkeypatch):
     """有的 Windows 把 .js 登记成 text/plain，浏览器会拒绝执行。
 
