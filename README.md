@@ -67,7 +67,7 @@
 
     .\.venv\Scripts\python.exe -m pytest -q
 
-153 条通过 + 3 条跳过，全部离线（模型用假桩）。覆盖解析、章节切分、引用校验、生成管线、
+158 条通过 + 3 条跳过，全部离线（模型用假桩）。覆盖解析、章节切分、引用校验、生成管线、
 Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取消。
 真模型的回归要手动开：`STUDY_LIVE=1` + 有 key 时 `tests/test_live.py` 才会跑真实链路（会花钱）。
 
@@ -86,7 +86,7 @@ Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取�
       serve.py      FastAPI（上传、解析、布局、生成、SSE 进度、历史、设置、探活）
       cli.py        命令行入口
       web/          三栏界面（原生 DOM，无构建链）+ grade.js + vendor/katex
-    tests/          153 passed + 3 skipped
+    tests/          158 passed + 3 skipped
     docs/
       ROADMAP.md    现状、硬约束、完整计划、已知问题、接下来做什么
       DECISIONS.md  为什么这么做（每条都带踩过的坑）

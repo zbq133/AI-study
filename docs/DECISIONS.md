@@ -266,3 +266,22 @@ CSS 的"类名没有人定义"和"故意不写样式"在浏览器里长得一模
 
 
 
+
+## 2026-11-03 补记：复查外部改动时补的三处
+
+`10322af`（VSCode 那边改的）把 CLI 的错误改成了人话、加了 `LLMBusy`、把 `import fitz` 换成了
+`import pymupdf`。本鱼复查时补了三处：
+
+1. **判错要「先看状态码，再看类名」。** `wrap_llm_error` 原来先按异常类名查表，可 openai 的
+   `APIStatusError` 是个泛型父类名 —— 503 也打这个名字，于是新增的 `LLMBusy` 只在类名正好是
+   `InternalServerError` 时生效，502/503 走别的类名仍会被说成「连不上模型服务」。挪成状态码优先后，
+   5xx 一律「服务繁忙」，没有状态码时才退回按名字认。
+   测试 `test_status_code_wins_over_a_generic_class_name` 守着；变异（改回名字优先）当场变红。
+2. **`PyMuPDF` 的下限得锁到 1.24.3。** 代码里是 `import pymupdf`，而这个顶层模块名是 1.24.3 才加的，
+   `requirements.txt` 还写着 `>=1.24` —— 别人照它装到 1.24.0 会 `ImportError`，报出来是「app 起不来」，
+   很难想到是版本下限。已改成 `>=1.24.3` 并在文件里写了原因，另加一条测试防止回退。
+3. **`tests/test_cli.py` 是 CRLF。** VSCode 在 Windows 上默认存成 CRLF，`git diff --numstat` 会显示
+   整文件重写，别人改一行也会变成全文件 diff。已用 `write_bytes` 换回 LF（项目里所有文本文件都是 LF、无 BOM）。
+   顺带把测试里的 `import fitz` 也迁到 `import pymupdf as fitz`，免得 `-p no:warnings` 一直盖着弃用警告。
+
+教训：外部提交也要按「判据是否真的生效」复查一遍，不能只看它新增了类、加了分支就算完。
