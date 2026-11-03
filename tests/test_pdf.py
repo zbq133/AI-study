@@ -1,8 +1,8 @@
 import fitz
 import pytest
 
-from app.pdf import (NoTextLayer, _order, _paragraphs, _plausible_title, _toc_key,
-                     extract_ir, page_text_map)
+from app.pdf import (NoTextLayer, _mode_size, _order, _paragraphs, _plausible_title,
+                     _toc_key, extract_ir, page_text_map)
 from app.schema import build_sections
 
 
@@ -71,6 +71,62 @@ def test_order_keeps_columns_apart_when_page_has_full_width_captions():
     ]
     texts = [l[0] for l in _order(lines, W)]
     assert texts.index("L3") < texts.index("R1")
+
+
+def test_order_puts_a_page_header_above_both_columns():
+    """页眉在全宽块里位置最高，必须排在左栏之前。
+
+    那份综述每页的页眉 `C. Wang et al.` 都是全宽的，以前和右栏一起按 y 排，
+    于是被塞到左栏末尾之后，14 页全中，14 条页眉混进了 10 个章节的正文。
+    """
+    W = 600.0
+
+    def line(text, x0, y0, x1):
+        return (text, 8.0, False, (x0, y0, x1, y0 + 10))
+
+    lines = [
+        line("HEADER", 40, 20, 560),
+        line("L1", 40, 60, 280), line("L2", 40, 72, 280), line("L3", 40, 84, 280),
+        line("R1", 320, 60, 560), line("R2", 320, 72, 560), line("R3", 320, 84, 560),
+    ]
+    texts = [l[0] for l in _order(lines, W)]
+    assert texts[0] == "HEADER"
+    assert texts.index("HEADER") < texts.index("L1")
+
+
+def test_order_keeps_a_bottom_caption_after_the_columns():
+    """页底的全宽图注不能跟着页眉一起被提到最前面 —— 它本来就该在正文之后。"""
+    W = 600.0
+
+    def line(text, x0, y0, x1):
+        return (text, 8.0, False, (x0, y0, x1, y0 + 10))
+
+    lines = [
+        line("L1", 40, 60, 280), line("L2", 40, 72, 280), line("L3", 40, 84, 280),
+        line("R1", 320, 60, 560), line("R2", 320, 72, 560), line("R3", 320, 84, 560),
+        line("CAP1", 40, 200, 560), line("CAP2", 40, 215, 560),
+    ]
+    texts = [l[0] for l in _order(lines, W)]
+    assert texts.index("CAP1") > texts.index("R3")
+    assert texts.index("CAP2") > texts.index("CAP1")
+
+
+def test_mode_size_follows_characters_not_line_count():
+    """小字行数更多、但每行都短的时候，字号基准仍要跟着正文走。
+
+    那本综述的正文 8.0 有 713 行、参考文献 6.4 有 630 行，只差 83 行；行数不看
+    每行多长，一页塞满短行就能把基准拽下去。这里 8.0 有 4 行、10.0 只有 2 行，
+    但 10.0 承载的字数更多，基准必须是 10.0。
+    """
+    weighted = [(10.0, 60)] * 2 + [(8.0, 20)] * 4     # 行数 4 > 2，字数 80 < 120
+    assert _mode_size(weighted) == 10.0
+
+
+def test_mode_size_does_not_lift_to_a_heading():
+    # 标题字号很大但字数极少，一旦让它当基准，所有正文行都不满足 size >= base*1.15
+    weighted = [(10.0, 50)] * 8 + [(18.0, 5)]
+    assert _mode_size(weighted) == 10.0
+    assert _mode_size([]) == 10.0
 
 
 def test_toc_key_ignores_numbering_punctuation():

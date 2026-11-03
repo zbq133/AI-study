@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections import Counter
 from pathlib import Path
 
 import fitz
@@ -74,9 +73,29 @@ def _toc_key(t: str) -> str:
     return _TOC_PUNCT.sub("", t or "").lower()
 
 
-def _mode_size(sizes):
-    c = Counter(round(s, 1) for s in sizes)
-    return c.most_common(1)[0][0] if c else 10.0
+def _mode_size(weighted):
+    """正文基准字号：取**字数最多**的那一档。
+
+    以前取"出现次数最多的字号"，在这本综述上只差 83 行就翻车：正文 8.0 有 713
+    行、参考文献小字 6.4 有 630 行。行数不看每行多长，一页塞满短行的参考文献
+    就能把基准拽下去；同一份文件按字数算是 43487 : 36109，余量宽松得多。
+
+    取"字数最多"而不是"字号最大的常见档"：标题那一档字数天然少（20pt 的章名
+    也就二十来个字），一旦让它进候选，基准会抬到标题字号，于是所有正文行都不
+    再满足 `size >= base * 1.15`，整本一个标题都认不出来。
+
+    仍然存在残余风险：参考文献真按字数盖过正文时基准还是会翻。彻底解法是按
+    参考文献段把那些页从直方图里剔掉（需要先切章节，顺序上放不到这里）。
+
+    weighted 是 (字号, 字数) 的可迭代对象。
+    """
+    total = {}
+    for size, n in weighted:
+        size = round(size, 1)
+        total[size] = total.get(size, 0) + n
+    if not total:
+        return 10.0
+    return max(total.items(), key=lambda kv: (kv[1], kv[0]))[0]
 
 
 def _page_lines(page):
@@ -97,6 +116,7 @@ def _page_lines(page):
 
 
 _WIDE_RATIO = 0.75
+_ORDER_TOL = 2.0
 
 
 def _order(lines, page_w):
@@ -106,6 +126,11 @@ def _order(lines, page_w):
     这不是干净的左右分栏。图注、表题这类**全宽元素**横跨两栏是正常的 —— 以前把
     它们也算进 span，一页有两条图注就把整页判成单栏，于是左右栏交错，后半页每
     一句都接错了上下文（p3 就是这样：14 行左栏和 15 行右栏被按 y 混排）。
+
+    全宽块还要分"页眉带"和"正文里"两种：页眉（`C. Wang et al.` 那种）在正文
+    上方，必须排在左栏**之前**。以前一视同仁地和右栏一起按 y 排，于是每页的
+    页眉都被塞到左栏末尾之后 —— 14 页全中，14 条页眉最后混进了 10 个章节的正文。
+    页底的全宽图注不用特殊处理：它和右栏一起按 y 排，位置本来就是对的。
     """
     if not lines:
         return []
@@ -117,7 +142,10 @@ def _order(lines, page_w):
     span = [l for l in rest if l[3][0] < mid and l[3][2] > mid + 20]
     key = lambda l: (round(l[3][1], 1), l[3][0])
     if len(left) > 0.3 * len(lines) and len(right) > 0.3 * len(lines) and len(span) <= 2:
-        return sorted(left, key=key) + sorted(wide + right, key=key)
+        top = min((l[3][1] for l in rest), default=0.0)
+        head = [l for l in wide if l[3][1] <= top + _ORDER_TOL]
+        body = [l for l in wide if l[3][1] > top + _ORDER_TOL]
+        return sorted(head, key=key) + sorted(left, key=key) + sorted(body + right, key=key)
     return sorted(lines, key=key)
 
 
@@ -222,7 +250,7 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
             f"{path.name}：{doc.page_count} 页里没有任何文字层（扫描件或图片型课件）。"
             "传 ocr=True 让它走 OCR：extract_ir(path, ocr=True)"
         )
-    base = _mode_size([l[1] for _, lines, *_ in raw for l in lines])
+    base = _mode_size([(l[1], len(l[0])) for _, lines, *_ in raw for l in lines])
 
     toc = [[lvl, title, pno] for lvl, title, pno in (doc.get_toc() or [])]
     toc_map = {_toc_key(t): (lvl, t) for lvl, t, _ in toc}
