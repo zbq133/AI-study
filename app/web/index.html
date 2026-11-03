@@ -50,6 +50,55 @@
   </section>
 </main>
 
+<button class="gear" id="gear" title="设置">⚙<span>设置</span></button>
+
+<div class="modal hide" id="setModal">
+  <div class="sheet">
+    <div class="sheethead">
+      <b>设置</b>
+      <button class="ghost" id="setClose" title="关掉">×</button>
+    </div>
+
+    <div class="sect">
+      <div class="secttitle">① 模型接入</div>
+
+      <label class="field">
+        <span>接入地址</span>
+        <input id="setUrl" type="text" spellcheck="false"
+               placeholder="https://api.deepseek.com">
+        <em class="src" id="srcUrl"></em>
+      </label>
+
+      <label class="field">
+        <span>API 密钥</span>
+        <input id="setKey" type="password" spellcheck="false" autocomplete="off"
+               placeholder="粘贴密钥">
+        <em class="src" id="srcKey"></em>
+      </label>
+
+      <label class="field">
+        <span>模型</span>
+        <input id="setModel" type="text" spellcheck="false" list="modelList"
+               placeholder="deepseek-chat">
+        <datalist id="modelList"></datalist>
+        <em class="src" id="srcModel"></em>
+      </label>
+
+      <div class="field">
+        <span>思考等级</span>
+        <div class="seg" id="setEffort"></div>
+        <em class="src">认这个参数的模型才生效；不认的话这一次会自动按默认跑，不会报错。</em>
+      </div>
+
+      <div class="sheetbar">
+        <button id="setSave">保存</button>
+        <button class="ghost" id="setTest">测一下模型列表</button>
+        <span class="meta" id="setMsg"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/katex/auto-render.min.js"></script>
 <script src="/static/grade.js"></script>

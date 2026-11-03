@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import __version__
+from . import settings as conf
 from .errors import MissingConfig, describe
 from .llm import LLM
 from .pdf import extract_ir, page_block_map
@@ -57,6 +58,13 @@ WEB_TYPES = {".css": "text/css; charset=utf-8",
              ".woff2": "font/woff2"}
 MAX_UPLOAD = 80 * 1024 * 1024
 REQUIRED = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
+_KEY_OF = {"LLM_BASE_URL": "base_url", "LLM_API_KEY": "api_key", "LLM_MODEL": "model"}
+
+
+def _missing() -> list[str]:
+    """还缺哪几项接入配置。按环境变量名报，界面上写的就是这几个名字。"""
+    eff = conf.effective()
+    return [name for name in REQUIRED if not eff[_KEY_OF[name]]]
 
 #: 一次生成最多调几次、最多烧多少 token —— 手滑跑整本时兜底。
 DEFAULT_MAX_CALLS = 40
@@ -211,18 +219,19 @@ def _safe(name: str) -> str:
 
 
 def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
-    missing = [k for k in REQUIRED if not os.environ.get(k)]
+    missing = _missing()
     if missing:
         raise MissingConfig(
-            "缺少环境变量：" + ", ".join(missing),
-            hint="在项目根目录的 .env 里填上这三个，然后重启服务。")
+            "缺少接入配置：" + ", ".join(missing),
+            hint="点左下角「设置」填上接入地址、API 密钥和模型，或者写进 .env。")
 
     ir = DOCS[doc_id]["ir"]
-    llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"],
-              os.environ["LLM_MODEL"],
+    eff = conf.effective()
+    llm = LLM(eff["base_url"], eff["api_key"], eff["model"],
               max_calls=_limit("LESSON_MAX_CALLS", DEFAULT_MAX_CALLS),
               max_tokens=_limit("LESSON_MAX_TOKENS", DEFAULT_MAX_TOKENS),
-              should_stop=job.cancel_evt.is_set)
+              should_stop=job.cancel_evt.is_set,
+              reasoning_effort=eff["reasoning_effort"])
 
     def on_step(info: dict) -> None:
         stage = info.get("stage")
@@ -486,9 +495,57 @@ async def job_events(job_id: str) -> StreamingResponse:
 @app.get("/api/config")
 async def config() -> dict:
     """前端先问一句 key 配好没有。"""
-    return {"ready": all(os.environ.get(k) for k in REQUIRED),
-            "missing": [k for k in REQUIRED if not os.environ.get(k)],
-            "model": os.environ.get("LLM_MODEL", "")}
+    missing = _missing()
+    return {"ready": not missing,
+            "missing": missing,
+            "model": conf.effective()["model"]}
+
+
+class SettingsBody(BaseModel):
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+
+
+@app.get("/api/settings")
+async def read_settings() -> dict:
+    """设置界面要的东西：现在接的是谁、密钥有没有（不回明文）、能选哪些模型。"""
+    return {"settings": conf.public(), "models": _models_of(conf.effective())}
+
+
+@app.post("/api/settings")
+async def write_settings(body: SettingsBody) -> dict:
+    """改设置。只传变化的那几项；密钥传空串 = 清掉（回落到 .env）。"""
+    data = body.model_dump(exclude_none=True)
+    url = (data.get("base_url") or "").strip()
+    if url and not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "接入地址要以 http:// 或 https:// 开头")
+    eff = (data.get("reasoning_effort") or "").strip()
+    if eff not in conf.EFFORT_VALUES:
+        raise HTTPException(400, "思考等级只能是空、low、medium、high")
+    if "reasoning_effort" in data:
+        data["reasoning_effort"] = eff
+    conf.save(data)
+    log.info("设置已更新：%s", ", ".join(sorted(data)) or "（没有变化）")
+    return {"settings": conf.public(), "models": _models_of(conf.effective())}
+
+
+def _models_of(eff: dict) -> list[str]:
+    """问一下接入地址有哪些模型。问不到就回空表 —— 界面允许手填。"""
+    base, key = eff["base_url"], eff["api_key"]
+    if not base or not key:
+        return []
+    try:
+        import httpx
+        r = httpx.get(f"{base.rstrip('/')}/models", timeout=4.0,
+                      headers={"Authorization": f"Bearer {key}"})
+        if r.status_code != 200:
+            return []
+        rows = r.json().get("data") or []
+    except Exception:          # 网络/解析都不该让设置界面打不开
+        return []
+    return sorted(str(m.get("id")) for m in rows if isinstance(m, dict) and m.get("id"))
 
 
 @app.get("/api/health")
@@ -497,7 +554,7 @@ async def health() -> dict:
 
     故意不读 PDF、不碰模型 —— 探活接口必须便宜到可以每秒打一次。
     """
-    missing = [k for k in REQUIRED if not os.environ.get(k)]
+    missing = _missing()
     running = sum(1 for j in JOBS.values() if j.state in ("queued", "running"))
     try:
         lessons = len(_store().list(limit=10_000))
@@ -507,7 +564,7 @@ async def health() -> dict:
             "version": __version__,
             "uptime": round(time.time() - STARTED, 1),
             "llm": {"ready": not missing, "missing": missing,
-                    "model": os.environ.get("LLM_MODEL", "")},
+                    "model": conf.effective()["model"]},
             "jobs": {"running": running, "total": len(JOBS)},
             "docs": len(DOCS),
             "lessons": lessons,

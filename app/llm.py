@@ -7,6 +7,15 @@ from pydantic import ValidationError
 
 from .errors import BudgetExceeded, Cancelled, LLMBadJSON, wrap_llm_error
 
+#: 报错里出现这些词，才认为是"这个模型不认 reasoning_effort"，才降级重试。
+#: 别放宽：宽了会把真错误吞成两次调用。
+_REASONING_WORDS = ("reasoning", "thinking", "effort")
+
+
+def _mentions_reasoning(exc: Exception) -> bool:
+    text = f"{exc}".lower()
+    return any(w in text for w in _REASONING_WORDS)
+
 
 class LLM:
     """一层薄封装：记调用次数/token，并在每次调用前问一句要不要停。
@@ -14,10 +23,15 @@ class LLM:
     max_calls / max_tokens 是"这一次生成"的上限，撞上就抛 BudgetExceeded；
     should_stop 是个无参函数，返回 True 就抛 Cancelled。两者都在**调用之前**检查，
     所以停下时不会再多花一次钱。
+
+    reasoning_effort 是界面上的"思考等级"（low/medium/high，空串=不传）。
+    不是所有模型都认这个参数，所以第一次被拒时会**去掉它重试一次**，
+    并把这个事实记在 `reasoning_note` 里 —— 界面上可以照实说，而不是假装生效了。
     """
 
     def __init__(self, base_url="", api_key="", model="", timeout=240.0, client=None,
-                 max_calls=None, max_tokens=None, should_stop=None):
+                 max_calls=None, max_tokens=None, should_stop=None,
+                 reasoning_effort=""):
         self.client = client if client is not None else OpenAI(
             base_url=base_url, api_key=api_key, timeout=timeout)
         self.model = model
@@ -27,10 +41,30 @@ class LLM:
         self.max_calls = max_calls
         self.max_tokens = max_tokens
         self.should_stop = should_stop
+        self.reasoning_effort = (reasoning_effort or "").strip()
+        self.reasoning_note = ""
 
     @property
     def tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
+
+    def _kwargs(self, msgs, temperature):
+        kw = {"model": self.model, "messages": msgs, "temperature": temperature,
+              "response_format": {"type": "json_object"}}
+        if self.reasoning_effort:
+            kw["extra_body"] = {"reasoning_effort": self.reasoning_effort}
+        return kw
+
+    def _create(self, msgs, temperature):
+        """发一次请求。思考等级被模型拒了就摘掉它再发一次。"""
+        try:
+            return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
+        except Exception as exc:
+            if not self.reasoning_effort or not _mentions_reasoning(exc):
+                raise
+            self.reasoning_note = ("当前模型不接受「思考等级」，这次已经按默认跑过去了。")
+            self.reasoning_effort = ""
+            return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
 
     def _check(self) -> None:
         """花钱之前问一次：被叫停了吗？快到上限了吗？"""
@@ -53,9 +87,7 @@ class LLM:
         for _ in range(retries + 1):
             self._check()
             try:
-                resp = self.client.chat.completions.create(
-                    model=self.model, messages=msgs, temperature=temperature,
-                    response_format={"type": "json_object"})
+                resp = self._create(msgs, temperature)
             except Exception as exc:   # 鉴权/限流/超时/网络，全收敛成人话
                 raise wrap_llm_error(exc) from exc
             self.calls += 1

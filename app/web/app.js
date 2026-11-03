@@ -500,3 +500,133 @@ $('#lesson').addEventListener('click', e => {
 
 /* 页面一打开就把历史列出来 —— 不依赖用户先传 PDF。 */
 loadHistory();
+
+/* ---------- 设置：左下角那颗钉子 ---------- */
+
+let setState = null;   // 最近一次从服务端拿到的设置（含 efforts 表）
+
+const SOURCE_TEXT = {
+  settings: '来自设置界面',
+  env: '来自 .env（设置界面留空就用它）',
+  '': '还没填',
+};
+
+function effortLabel(v) {
+  const row = (setState && setState.efforts || []).find(x => x.value === v);
+  return row ? row.label : (v || '默认');
+}
+
+function paintEfforts(current) {
+  const box = $('#setEffort');
+  box.innerHTML = '';
+  (setState && setState.efforts || []).forEach(({ value, label }) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.value = value;
+    b.textContent = label;
+    if (value === (current || '')) b.classList.add('on');
+    b.onclick = () => {
+      box.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    };
+    box.appendChild(b);
+  });
+}
+
+function fillModels(models) {
+  const dl = $('#modelList');
+  dl.innerHTML = '';
+  (models || []).forEach(id => {
+    const o = document.createElement('option');
+    o.value = id;
+    dl.appendChild(o);
+  });
+}
+
+function paintSettings(payload) {
+  const s = setState = payload.settings;
+  $('#setUrl').value = s.base_url || '';
+  $('#setKey').value = '';
+  $('#setKey').placeholder = s.has_key
+    ? `已保存 ${s.key_hint}，留空就不改`
+    : '粘贴密钥';
+  $('#setModel').value = s.model || '';
+  $('#srcUrl').textContent = SOURCE_TEXT[s.source.base_url || ''] || '';
+  $('#srcKey').textContent = s.has_key
+    ? `已保存 ${s.key_hint} · ${SOURCE_TEXT[s.source.api_key || ''] || ''}`
+    : '还没有密钥';
+  $('#srcModel').textContent = SOURCE_TEXT[s.source.model || ''] || '';
+  paintEfforts(s.reasoning_effort);
+  fillModels(payload.models);
+  $('#setMsg').textContent = payload.models && payload.models.length
+    ? `接入地址上有 ${payload.models.length} 个模型` : '';
+}
+
+async function openSettings() {
+  $('#setModal').classList.remove('hide');
+  $('#setMsg').textContent = '读设置……';
+  try {
+    paintSettings(await (await fetch('/api/settings')).json());
+  } catch (e) {
+    $('#setMsg').textContent = '读不到设置：' + e;
+  }
+}
+
+function closeSettings() {
+  $('#setModal').classList.add('hide');
+}
+
+$('#gear').onclick = openSettings;
+$('#setClose').onclick = closeSettings;
+$('#setModal').addEventListener('click', e => {
+  if (e.target === $('#setModal')) closeSettings();   // 点空白处关掉
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSettings();
+});
+
+async function saveSettings(extra) {
+  const body = Object.assign({
+    base_url: $('#setUrl').value.trim(),
+    model: $('#setModel').value.trim(),
+  }, extra || {});
+  const key = $('#setKey').value.trim();
+  if (key) body.api_key = key;            // 留空 = 不动已保存的
+  const on = $('#setEffort button.on');
+  if (on) body.reasoning_effort = on.dataset.value;
+  const r = await fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail || '保存失败');
+  paintSettings(data);
+  $('#setMsg').textContent = '保存好了';
+}
+
+$('#setSave').onclick = async () => {
+  $('#setMsg').textContent = '保存中……';
+  try {
+    await saveSettings();
+    const c = await (await fetch('/api/config')).json();
+    $('#go').disabled = !(docId && section && c.ready);
+    if (!c.ready) $('#setMsg').textContent = '还差：' + c.missing.join('、');
+  } catch (e) {
+    $('#setMsg').textContent = String(e.message || e);
+  }
+};
+
+$('#setTest').onclick = async () => {
+  $('#setMsg').textContent = '问一下模型列表……（会先把上面的地址和密钥存下来）';
+  try {
+    await saveSettings();
+    const n = $('#modelList').options.length;
+    $('#setMsg').textContent = n
+      ? `拿到 ${n} 个模型，点「模型」输入框能选`
+      : '没问到模型列表：地址/密钥可能不对，或者这家不提供 /models';
+  } catch (e) {
+    $('#setMsg').textContent = String(e.message || e);
+  }
+};
+

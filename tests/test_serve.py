@@ -53,9 +53,10 @@ class _FakeLLM:
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """上传目录和成品目录都搬到临时目录，别往仓库里写。"""
+    """上传目录、成品目录、设置文件都搬到临时目录，别往仓库里写也别读本机的。"""
     monkeypatch.setattr(serve, "UPLOAD_DIR", tmp_path / "uploads")
     monkeypatch.setattr(serve, "OUT_DIR", tmp_path / "out")
+    monkeypatch.setattr(serve.conf, "SETTINGS_PATH", tmp_path / "settings.json")
     serve.DOCS.clear()
     serve.JOBS.clear()
     return tmp_path
@@ -219,7 +220,7 @@ def test_lesson_job_fails_without_env(doc_pdf, monkeypatch):
         r = client.post("/api/lessons", json={"doc_id": doc_id, "chapter": title})
         snap = _wait(client, r.json()["job_id"])
     assert snap["state"] == "failed"
-    assert "缺少环境变量" in snap["error"]
+    assert "缺少接入配置" in snap["error"]
     # 前端照着 error_info 说人话：kind 认得出、title/hint 都有
     info = snap["error_info"]
     assert info["kind"] == "config"
@@ -530,3 +531,68 @@ def test_logging_goes_to_a_file_in_the_out_dir(tmp_path):
         for h in added:
             serve.log.removeHandler(h)
             h.close()
+
+
+# ---------- 设置界面后端 ----------
+
+@pytest.fixture()
+def clean_env(env, monkeypatch):
+    """把接入配置清干净，也不许去问真服务的模型列表。"""
+    for key in serve.REQUIRED + ("LLM_REASONING_EFFORT",):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(serve, "_models_of", lambda eff: [])
+    return env
+
+
+def test_settings_endpoint_says_what_is_connected(clean_env, monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "deepseek-chat")
+    with TestClient(serve.app) as client:
+        body = client.get("/api/settings").json()
+    s = body["settings"]
+    assert s["model"] == "deepseek-chat"
+    assert s["source"]["model"] == "env"
+    assert {"value": "high", "label": "高 · 想得多"} in s["efforts"]
+    assert body["models"] == []
+
+
+def test_settings_endpoint_does_not_echo_the_key(clean_env, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "sk-secret-value-1234")
+    with TestClient(serve.app) as client:
+        text = client.get("/api/settings").text
+    assert "sk-secret-value-1234" not in text
+    assert "sk-…1234" in text
+
+
+def test_post_settings_saves_and_takes_effect(clean_env):
+    with TestClient(serve.app) as client:
+        r = client.post("/api/settings", json={"base_url": "https://api.example.com",
+                                               "model": "m1", "reasoning_effort": "high"})
+        assert r.status_code == 200
+        assert r.json()["settings"]["model"] == "m1"
+        assert r.json()["settings"]["source"]["model"] == "settings"
+        assert client.get("/api/config").json()["ready"] is False   # 还差密钥
+    assert serve.conf.load()["reasoning_effort"] == "high"
+
+
+def test_post_settings_rejects_junk(clean_env):
+    with TestClient(serve.app) as client:
+        assert client.post("/api/settings", json={"base_url": "ftp://x"}).status_code == 400
+        assert client.post("/api/settings",
+                           json={"reasoning_effort": "极高"}).status_code == 400
+
+
+def test_settings_make_the_service_ready(clean_env):
+    with TestClient(serve.app) as client:
+        client.post("/api/settings", json={"base_url": "https://api.example.com",
+                                           "api_key": "sk-x", "model": "m1"})
+        assert client.get("/api/config").json()["ready"] is True
+        assert client.get("/api/health").json()["llm"]["ready"] is True
+
+
+def test_settings_need_no_restart(clean_env):
+    """改完设置立刻能生成 —— 不用重启服务，这是做这一栏的全部理由。"""
+    with TestClient(serve.app) as client:
+        assert client.get("/api/config").json()["ready"] is False
+        client.post("/api/settings", json={"base_url": "https://api.example.com",
+                                           "api_key": "sk-x", "model": "m1"})
+        assert client.get("/api/config").json()["model"] == "m1"
