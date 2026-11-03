@@ -36,6 +36,19 @@ button.ghost:hover, .seg button:hover { border-color: var(--accent); color: var(
   .opt:not(:disabled):active, .tabs .tab:active, .seg button:active { transform: none; }
 }
 
+/* 点一下就在整行外面挂一圈黑框 —— 那是浏览器给的默认焦点环，鼠标点按钮也算。
+   "能看出来焦点在哪"是键盘用户的必需品，所以不能直接删掉：鼠标点不给，
+   用 Tab 走过来才给（:focus-visible 就是这个区分）。 */
+button:focus, .hist-item:focus, .toc-item:focus, .ref:focus, .opt:focus,
+.tabs .tab:focus, .seg button:focus, [tabindex]:focus { outline: none; }
+
+button:focus-visible, .hist-item:focus-visible, .toc-item:focus-visible,
+.ref:focus-visible, .opt:focus-visible, .tabs .tab:focus-visible,
+.seg button:focus-visible, [role="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* 唯一的显隐开关。**这条规则缺过一阵子**：.hide 在 HTML/JS 里用了十几处
    （进度条、停按钮、习题的答案解析、再做一次），少这一行它们全都从头显出来 ——
    最刺眼的就是习题答案在答题前就摆在那儿。改这里要同步跑 tests/test_serve.py 里那条断言。 */
@@ -257,6 +270,9 @@ button.danger:disabled { opacity: .4; }
               background: var(--panel); border: 1px solid var(--line2);
               border-radius: 999px; cursor: pointer; }
 .seg button.on { color: var(--hl-fg); background: var(--hl-bg); border-color: var(--hl-line); }
+.stylehint { font-size: 13px; line-height: 1.75; color: var(--dim);
+             background: var(--panel2); border: 1px solid var(--line);
+             border-radius: 8px; padding: 10px 12px; }
 .sheetbar { display: flex; align-items: center; gap: 10px; margin-top: 18px;
             padding-top: 14px; border-top: 1px solid var(--line); }
 .sheetbar .meta { color: var(--ok); }

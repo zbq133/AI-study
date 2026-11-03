@@ -61,9 +61,10 @@ def test_unknown_fields_are_ignored(box):
 
 def test_nothing_set_means_all_empty(box):
     assert conf.effective() == {"base_url": "", "api_key": "", "model": "",
-                                "reasoning_effort": ""}
+                                "reasoning_effort": "", "style": ""}
     assert conf.public()["has_key"] is False
     assert conf.public()["key_hint"] == ""
+    assert conf.public()["style"] == "rigorous"      # 空 = 界面按默认那档亮着
 
 
 def test_effort_list_is_offered_to_the_ui(box):

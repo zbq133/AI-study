@@ -58,3 +58,45 @@ answer 只填选项字母（如 "B" 或 "AC"），不许写汉字、不许写选
 VERIFY_USER = """{stem}
 
 {options}"""
+
+
+#: 讲师的语言风格。三段提示词拼在 SECTION_SYS / QUIZ_SYS 后面。
+#: 共同底线写在 _STYLE_GUARD 里：风格只决定"怎么讲"，不决定"讲什么"。
+STYLES: tuple[tuple[str, str], ...] = (
+    ("rigorous", "严谨认真"),
+    ("vivid", "生动风趣"),
+    ("humorous", "幽默诙谐"),
+)
+STYLE_VALUES = tuple(v for v, _ in STYLES)
+DEFAULT_STYLE = "rigorous"
+
+_STYLE_GUARD = """
+【语言风格】{label}
+{body}
+风格只影响怎么讲，不影响讲什么：原文依据、公式、页码出处、易错点的准确性，
+一条都不许因为换了语气而放宽。宁可讲得朴素，也不许为了好玩编事实。
+"""
+
+STYLE_BODIES = {
+    "rigorous": """用教材的语气：先给定义，再给成立条件，然后才是解释和例子。
+措辞要精确，一个词只表达一个意思；不用感叹号，不用"咱们""你知道吗"这类口语，
+不抖机灵，不为了活跃气氛加无信息量的句子。宁可枯燥，也不许含糊。""",
+
+    "vivid": """要有画面感：先抛一个具体场景或现象，让人"看见"这件事，再收回到定义。
+多用动词和具体的量（"每秒三百四十米"而不是"很快"），比喻要贴切、能对上物理量，
+不要堆形容词。节奏轻快，但每一段都要有实在的知识增量。""",
+
+    "humorous": """像一位会讲段子的老师：用反差、夸张的类比、意料之外的对照把难点讲活，
+允许自嘲和冷幽默，允许把常见误解演一遍再拆掉。但笑点必须服务于理解 ——
+梗讲完要落回准确的定义和推导；不许拿学生或任何群体开玩笑，不许用段子顶替定义，
+一段里最多一个笑点，别把讲义写成脱口秀稿。""",
+}
+
+
+def style_block(key: str = "") -> str:
+    """把语言风格翻成提示词片段。认不出的 key 一律按默认（严谨认真）。"""
+    k = (key or "").strip().lower()
+    if k not in STYLE_BODIES:
+        k = DEFAULT_STYLE
+    label = dict(STYLES)[k]
+    return _STYLE_GUARD.format(label=label, body=STYLE_BODIES[k])

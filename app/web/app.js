@@ -670,6 +670,44 @@ function paintEfforts(current) {
 
 const MANUAL = '__manual__';
 
+//: 每一档"讲起来是什么样"的一句话说明。给选风格的人看，不是给模型看的。
+const STYLE_HINT = {
+  rigorous: '教材口吻：先定义、再条件、然后才解释。不用感叹号，不抖机灵，宁可枯燥也不含糊。',
+  vivid: '先给场景和画面，再收回定义。比喻要对得上物理量，节奏轻快，但不堆形容词。',
+  humorous: '会讲段子的老师：反差和夸张的类比把难点讲活，一段一个笑点，讲完落回准确的定义。',
+};
+
+function paintStyles(current) {
+  const box = $('#setStyle');
+  const rows = (setState && setState.styles) || [];
+  box.innerHTML = '';
+  rows.forEach(({ value, label }) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.value = value;
+    b.textContent = label;
+    if (value === (current || 'rigorous')) b.classList.add('on');
+    b.onclick = async () => {
+      box.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      paintStyleHint(b.dataset.value);
+      try {
+        await saveSettings();            // 选完立刻落盘，不用再点一次保存
+        $('#setMsg').textContent = `语言风格：${b.textContent}`;
+      } catch (e) {
+        $('#setMsg').textContent = String(e.message || e);
+      }
+    };
+    box.appendChild(b);
+  });
+  paintStyleHint(current || 'rigorous');
+}
+
+function paintStyleHint(value) {
+  $('#styleHint').textContent = STYLE_HINT[value] || '';
+}
+
+
 function fillModels(models, current) {
   const sel = $('#setModel');
   const list = (models || []).slice();
@@ -716,6 +754,7 @@ function paintSettings(payload) {
   $('#srcModel').textContent = SOURCE_TEXT[s.source.model || ''] || '';
   fillModels(payload.models, s.model);
   paintEfforts(s.reasoning_effort);
+  paintStyles(s.style);
   $('#setMsg').textContent = payload.models && payload.models.length
     ? `接入地址上有 ${payload.models.length} 个模型` : '';
 }
@@ -755,6 +794,8 @@ async function saveSettings(extra) {
   if (key) body.api_key = key;            // 留空 = 不动已保存的
   const on = $('#setEffort button.on');
   if (on) body.reasoning_effort = on.dataset.value;
+  const st = $('#setStyle button.on');
+  if (st) body.style = st.dataset.value;
   const r = await fetch('/api/settings', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -16,12 +16,15 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .prompts import DEFAULT_STYLE, STYLES
+
 #: 配置放项目根，不放 out/ —— 那是产物目录，会被清空、会被当成缓存。
 SETTINGS_PATH = Path("settings.json")
 
-FIELDS = ("base_url", "api_key", "model", "reasoning_effort")
+FIELDS = ("base_url", "api_key", "model", "reasoning_effort", "style")
 ENV_OF = {"base_url": "LLM_BASE_URL", "api_key": "LLM_API_KEY",
-          "model": "LLM_MODEL", "reasoning_effort": "LLM_REASONING_EFFORT"}
+          "model": "LLM_MODEL", "reasoning_effort": "LLM_REASONING_EFFORT",
+          "style": "LLM_STYLE"}
 
 #: 思考等级。空串 = 不传这个参数（默认行为，兼容不认它的模型）。
 EFFORTS: tuple[tuple[str, str], ...] = (
@@ -31,6 +34,10 @@ EFFORTS: tuple[tuple[str, str], ...] = (
     ("high", "高 · 想得多"),
 )
 EFFORT_VALUES = tuple(v for v, _ in EFFORTS)
+
+#: 讲师的语言风格。空 = 用默认（严谨认真）。选项与提示词都在 prompts 里，
+#: 这里只做"可选值"和前端标签，免得两边各写一遍对不上。
+STYLE_VALUES = tuple(v for v, _ in STYLES)
 
 
 def path() -> Path:
@@ -124,10 +131,13 @@ def _hint(key: str) -> str:
 def public() -> dict[str, Any]:
     """给前端看的那份。**密钥不回明文**，只回有没有、尾四位。"""
     eff = effective()
+    style = eff["style"] or DEFAULT_STYLE
     return {"base_url": eff["base_url"],
             "model": eff["model"],
             "reasoning_effort": eff["reasoning_effort"],
+            "style": style,
             "has_key": bool(eff["api_key"]),
             "key_hint": _hint(eff["api_key"]),
             "source": {k: source_of(k) for k in FIELDS},
-            "efforts": [{"value": v, "label": lab} for v, lab in EFFORTS]}
+            "efforts": [{"value": v, "label": lab} for v, lab in EFFORTS],
+            "styles": [{"value": v, "label": lab} for v, lab in STYLES]}

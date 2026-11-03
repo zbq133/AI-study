@@ -5,7 +5,8 @@ import re
 from .errors import ChapterNotFound, StudyError, is_fatal
 from .pdf import page_block_map, page_text_map
 from .prompts import (OUTLINE_SYS, OUTLINE_USER, QUIZ_SYS, QUIZ_USER,
-                      SECTION_SYS, SECTION_USER, VERIFY_SYS, VERIFY_USER)
+                      SECTION_SYS, SECTION_USER, VERIFY_SYS, VERIFY_USER,
+                      style_block)
 from .schema import (DocIR, Lesson, LessonSection, Outline, QuizItem, QuizPack,
                      Section, VerifyResult, build_sections, extract_answer,
                      normalize, select_chapter, verify_refs)
@@ -74,12 +75,12 @@ def plan_outline(llm, chapter, sections):
                     Outline, temperature=0.2)
 
 
-def write_section(llm, chapter, item, sections, page_text, blocks=None):
+def write_section(llm, chapter, item, sections, page_text, blocks=None, style=""):
     pages = set(item.pages or [])
     picked = [s for s in sections if set(range(s.page_start, s.page_end + 1)) & pages]
     src = picked or sections
     lesson = llm.json(
-        SECTION_SYS,
+        SECTION_SYS + style_block(style),
         SECTION_USER.format(chapter=chapter, title=item.title,
                             points="、".join(item.points or []), text=_render(src)),
         LessonSection, temperature=0.4)
@@ -144,7 +145,8 @@ def _solve_independently(llm, q) -> bool:
     return mapped == target
 
 
-def make_quiz(llm, lessons, n, page_text, blocks=None, source="", on_step=None):
+def make_quiz(llm, lessons, n, page_text, blocks=None, source="", on_step=None,
+              style=""):
     """on_step 每判完一道题调一次：{"stage": "verify", "index": i, "total": n}。
 
     出题阶段每道题要重解两遍（原顺序 + 打乱），是整条流水线里最闷的一段，
@@ -165,7 +167,7 @@ def make_quiz(llm, lessons, n, page_text, blocks=None, source="", on_step=None):
     for _ in range(2):
         if asked <= 0:
             break
-        pack = llm.json(QUIZ_SYS,
+        pack = llm.json(QUIZ_SYS + style_block(style),
                         QUIZ_USER.format(n=asked, k=max(3, asked // 2),
                                          text=body, source=source),
                         QuizPack, temperature=0.5)
@@ -237,7 +239,7 @@ def _bullets(lessons, limit: int = 10) -> list[str]:
     return out[:limit]
 
 
-def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None):
+def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None, style=""):
     """跑完整条流水线。
 
     on_step 每推进一格调一次，收到 {"stage": ..., ...}：outline / section /
@@ -263,10 +265,10 @@ def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None):
     lessons = []
     for i, item in enumerate(outline.sections, 1):
         step(stage="section", index=i, total=total, title=item.title)
-        lessons.append(write_section(llm, chapter, item, sections, ptext, blocks))
+        lessons.append(write_section(llm, chapter, item, sections, ptext, blocks, style))
     step(stage="quiz")
     quiz = make_quiz(llm, lessons, n_quiz, ptext, blocks,
-                     source=_render_sources(ir, sections), on_step=on_step)
+                     source=_render_sources(ir, sections), on_step=on_step, style=style)
     step(stage="done")
 
     return Lesson(

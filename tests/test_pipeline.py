@@ -244,3 +244,40 @@ def test_quiz_reports_progress_while_verifying():
     build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=1,
                  on_step=lambda info: seen.append(info.get("stage")))
     assert "verify" in seen, f"判题阶段没有进度回报：{seen}"
+
+
+class _SysRecorder(FakeLLM):
+    """记下每次调用收到的 system 提示词。"""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.systems = []
+
+    def json(self, system, user, model_cls, temperature=0.3, retries=2):
+        self.systems.append(system)
+        return super().json(system, user, model_cls, temperature, retries)
+
+
+def test_style_reaches_both_the_lesson_and_the_quiz_prompts():
+    llm = _SysRecorder()
+    build_lesson(llm, make_ir(), "第1章", n_quiz=1, style="humorous")
+    assert any("幽默诙谐" in s for s in llm.systems)
+    assert len(llm.systems) >= 3                      # 大纲 + 讲义 + 出题
+    # 讲义与出题都要带上风格，不只是其中一处
+    assert sum("幽默诙谐" in s for s in llm.systems) >= 2
+
+
+def test_unknown_style_falls_back_to_rigorous():
+    llm = _SysRecorder()
+    build_lesson(llm, make_ir(), "第1章", n_quiz=1, style="说相声")
+    assert any("严谨认真" in s for s in llm.systems)
+    assert not any("幽默诙谐" in s or "生动风趣" in s for s in llm.systems)
+
+
+def test_every_style_says_facts_are_not_negotiable():
+    """换语气不能顺势把"只许用原文"这条放宽 —— 三段都要写死这句底线。"""
+    from app.prompts import STYLE_BODIES, style_block
+    for key in STYLE_BODIES:
+        block = style_block(key)
+        assert "不许为了好玩编事实" in block, key
+        assert "出处" in block, key

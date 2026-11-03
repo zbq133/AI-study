@@ -94,6 +94,7 @@
 
     <div class="tabs" id="setTabs">
       <button type="button" class="tab on" data-tab="model">模型接入</button>
+      <button type="button" class="tab" data-tab="style">语言风格</button>
       <button type="button" class="tab" data-tab="theme">颜色</button>
       <button type="button" class="tab" data-tab="font">字号</button>
       <button type="button" class="tab" data-tab="about">版本</button>
@@ -132,6 +133,18 @@
         <button id="setSave">保存</button>
         <button class="ghost" id="setTest">测一下模型列表</button>
         <span class="meta" id="setMsg"></span>
+      </div>
+    </div>
+
+    <div class="pane hide" data-pane="style">
+      <div class="field">
+        <span>讲师的语言风格</span>
+        <div class="seg" id="setStyle"></div>
+        <em class="src">决定讲义和题目怎么说话：事实、公式、出处引用不受影响，只是语气不同。</em>
+      </div>
+      <div class="field">
+        <span>这一档大概是这样</span>
+        <div class="stylehint" id="styleHint"></div>
       </div>
     </div>
 

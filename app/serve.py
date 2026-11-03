@@ -281,7 +281,8 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
             job.advance(95, "整理讲义")
 
     with _generate_lock:
-        lesson = build_lesson(llm, ir, chapter, n_quiz, on_step=on_step)
+        lesson = build_lesson(llm, ir, chapter, n_quiz, on_step=on_step,
+                              style=eff["style"])
 
     out = OUT_DIR / f"{Path(DOCS[doc_id]['path']).stem}_{_safe(chapter)}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -633,6 +634,7 @@ class SettingsBody(BaseModel):
     api_key: Optional[str] = None
     model: Optional[str] = None
     reasoning_effort: Optional[str] = None
+    style: Optional[str] = None
 
 
 @app.get("/api/settings")
@@ -653,6 +655,11 @@ async def write_settings(body: SettingsBody) -> dict:
         raise HTTPException(400, "思考等级只能是空、low、medium、high")
     if "reasoning_effort" in data:
         data["reasoning_effort"] = eff
+    style = (data.get("style") or "").strip()
+    if style and style not in conf.STYLE_VALUES:
+        raise HTTPException(400, "语言风格只能是 " + "、".join(conf.STYLE_VALUES))
+    if "style" in data:
+        data["style"] = style
     conf.save(data)
     log.info("设置已更新：%s", ", ".join(sorted(data)) or "（没有变化）")
     return {"settings": conf.public(), "models": _models_of(conf.effective())}

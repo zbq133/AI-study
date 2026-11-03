@@ -371,18 +371,18 @@ def test_theme_reaches_the_page_before_the_first_paint(env):
     assert "function applyTheme" in js and "dataset.theme" in js
 
 
-def test_settings_are_split_into_four_tabs(env):
-    """模型接入 / 颜色 / 字号 / 版本 各是一个标签，点哪个只显示哪个。"""
+def test_settings_are_split_into_five_tabs(env):
+    """模型接入 / 语言风格 / 颜色 / 字号 / 版本 各是一个标签，点哪个只显示哪个。"""
     with TestClient(serve.app) as client:
         html = client.get("/").text
         js = client.get("/static/app.js").text
     assert 'id="setTabs"' in html
     tabs = re.findall(r'class="tab[^"]*"\s+data-tab="(\w+)"[^>]*>([^<]+)<', html)
-    assert [t[0] for t in tabs] == ["model", "theme", "font", "about"], tabs
-    assert [t[1].strip() for t in tabs] == ["模型接入", "颜色", "字号", "版本"]
+    assert [t[0] for t in tabs] == ["model", "style", "theme", "font", "about"], tabs
+    assert [t[1].strip() for t in tabs] == ["模型接入", "语言风格", "颜色", "字号", "版本"]
     panes = re.findall(r'class="pane([^"]*)"\s+data-pane="(\w+)"', html)
-    assert [p[1] for p in panes] == ["model", "theme", "font", "about"], panes
-    # 除了模型接入，其余三个一开始都是 hide
+    assert [p[1] for p in panes] == ["model", "style", "theme", "font", "about"], panes
+    # 除了模型接入，其余四个一开始都是 hide
     assert panes[0][0].strip() == ""
     assert all("hide" in p[0] for p in panes[1:]), panes
     assert "function showTab" in js
@@ -1121,3 +1121,57 @@ def test_a_refused_reasoning_effort_is_shown_to_the_user(env, doc_pdf, monkeypat
         snap = _wait(client, r.json()["job_id"])
     assert snap["state"] == "done"
     assert "思考等级" in snap["result"]["reasoning_note"]
+
+
+def test_style_tab_offers_three_tones_and_marks_the_default(env):
+    """三档风格都要露出来，默认那颗要亮着。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+        data = client.get("/api/settings").json()
+    assert 'id="setStyle"' in html and 'id="styleHint"' in html
+    assert [s["value"] for s in data["settings"]["styles"]] == ["rigorous", "vivid", "humorous"]
+    assert data["settings"]["style"] == "rigorous"
+    assert "function paintStyles" in js
+    assert "value === (current || 'rigorous')" in js
+
+
+def test_style_is_saved_and_reaches_the_pipeline(env, doc_pdf, monkeypatch):
+    """选了风格要落进 settings.json，并且真的进了给模型的 system 提示词。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    seen_systems = []
+
+    class _RecLLM(_FakeLLM):
+        def json(self, system, user, model_cls, temperature=0.3, retries=2):
+            seen_systems.append(system)
+            return super().json(system, user, model_cls, temperature, retries)
+
+    monkeypatch.setattr(serve, "LLM", _RecLLM)
+    with TestClient(serve.app) as client:
+        assert client.post("/api/settings", json={"style": "humorous"}).status_code == 200
+        assert client.get("/api/settings").json()["settings"]["style"] == "humorous"
+        doc_id, res = _parsed(client, doc_pdf)
+        r = client.post("/api/lessons",
+                        json={"doc_id": doc_id, "chapter": res["sections"][0]["title"],
+                              "n_quiz": 1})
+        _wait(client, r.json()["job_id"])
+    assert any("幽默诙谐" in s for s in seen_systems), "风格没进提示词"
+    assert not any("严谨认真" in s for s in seen_systems)
+
+
+def test_a_junk_style_is_refused(env):
+    with TestClient(serve.app) as client:
+        r = client.post("/api/settings", json={"style": "说相声"})
+    assert r.status_code == 400
+    assert "语言风格" in r.json()["detail"]
+
+
+def test_clicking_a_row_does_not_draw_a_black_frame(env):
+    """鼠标点一下不该在整行外面挂一圈黑框（那是默认焦点环），键盘走位才给。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    assert re.search(r"button:focus,\s*\.hist-item:focus[^{]*\{[^}]*outline:\s*none", css), \
+        "没关掉鼠标点击的焦点环"
+    assert re.search(r":focus-visible[^{]*\{[^}]*outline:\s*2px solid var\(--accent\)", css), \
+        "键盘用户看不见焦点在哪了"

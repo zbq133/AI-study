@@ -449,3 +449,40 @@ applyTheme）都必须是 `'light'`，且不许再出现 `t.mode || 'dark'`。
 - 全选的 `<input>` 换成 `<span class="pick">`，JS 由 `checked` 改成 `classList.toggle('picked', …)`，
   这样两颗框共用同一套样式，不会一个圆一个方。键盘也留着：`role="checkbox"` + 空格/回车都能切。
 - 选中行的浅蓝底（`--opt-on-bg`）保留 —— 对钩说明"这一条"，底色说明"整行被选中"，两回事。
+## 2026-11-04 补记：语言风格与"黑色长条"
+
+### 讲师的语言风格
+
+设置里加第五个标签，三档：严谨认真（默认）、生动风趣、幽默诙谐。三段提示词写在
+`app/prompts.py` 的 `STYLE_BODIES` 里，由 `style_block()` 统一包一层底线：
+
+    【语言风格】<标签>
+    <正文>
+    风格只影响怎么讲，不影响讲什么：原文依据、公式、页码出处、易错点的准确性，
+    一条都不许因为换了语气而放宽。宁可讲得朴素，也不许为了好玩编事实。
+
+- **底线必须和风格一起写在同一段提示词里**。只在别处写"不许编"，模型换了语气会更
+  容易顺嘴补充；把它贴在风格说明后面，模型才把"俏皮"和"编造"分开。
+- 注入点是讲义（`SECTION_SYS`）与出题（`QUIZ_SYS`）两处，**大纲不注入** —— 大纲是
+  结构（几块、每块几页），没有"语气"可言，给它加风格只会让分块变得不稳定。
+- 存在 `settings.json` 的 `style` 字段，环境变量 `LLM_STYLE` 兜底；空/认不出的值一律
+  按严谨认真处理（`style_block` 里 `k not in STYLE_BODIES → DEFAULT_STYLE`），
+  坏数据不该让生成直接失败。
+- 界面上点一下就落盘，不像地址/密钥还要再点"保存"—— 它只是一个开关，没有中间态。
+
+### 点一下整行冒出黑色长条
+
+现象：点「最近生成」里任意一条，整行外面立刻多出一圈黑框。
+
+根因不是我们画的任何东西，是**浏览器给的默认焦点环**：`.hist-item` 是 `<button>`，
+点它就会拿到焦点，Chromium 在浅色底上画的是黑框，正好把整行框住，看起来像一条黑条。
+
+修法分两半，缺一半都不行：
+
+    button:focus, .hist-item:focus, …, [tabindex]:focus { outline: none; }
+    button:focus-visible, …, [role="checkbox"]:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 2px;
+    }
+
+`:focus-visible` 是"键盘来的时候才成立"的那个状态：鼠标点不给框，Tab 走过来给一圈
+蓝色。只写 `outline: none` 会把键盘用户的眼睛也一起关掉，那是拿可用性换好看。
