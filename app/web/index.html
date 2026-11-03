@@ -31,7 +31,9 @@
 
 <header class="top">
   <span class="brand">AI Study</span>
-  <input type="file" id="file" accept=".pdf">
+  <input type="file" id="file" accept=".pdf" class="sr-only">
+  <button id="pick" class="pickfile">选择文件</button>
+  <span class="meta" id="fname">未选择文件</span>
   <button id="up">上传并解析</button>
   <span class="meta" id="upMeta"></span>
   <span class="sep"></span>

@@ -1201,16 +1201,49 @@ def test_ui_text_is_not_selectable_but_content_still_is(env):
     assert "user-select: text" in rule(".qans")
 
 
-def test_file_picker_button_follows_the_palette(env):
-    """原生「选择文件」是系统灰，跟蓝白配色不搭 —— 只认 ::file-selector-button 这个口子。"""
+def test_the_opened_lesson_is_marked_in_the_list(env):
+    """一列同名「第十章」，点开哪条得看得出来 —— 只写 hover 等于没标。"""
     with TestClient(serve.app) as client:
         css = client.get("/static/app.css").text
-    btn = css[css.index("::file-selector-button"):]
-    btn = btn[:btn.index("}")]
-    assert "background: var(--accent)" in btn
-    assert "color: #fff" in btn
-    # 老 Chromium（含 WebView2 早期版本）只认 -webkit- 那个名字
-    assert "::-webkit-file-upload-button" in css
+        js = client.get("/static/app.js").text
+
+    def rule(selector):
+        i = css.index(selector)
+        return css[i:css.index("}", i)]
+
+    on = rule(".hist-item.on")
+    assert "var(--sel-bg)" in on and "font-weight: 600" in on
+    assert "inset 3px 0 0 var(--sel-line)" in on
+    # 打开时标、重画列表时也要标回去（loadHistory 之后不能再掉）
+    start = js.index("async function openLesson")
+    body = js[start:js.index("\nasync function ", start + 10)]
+    assert "markHistory(id)" in body, "openLesson 里没有标当前这一条"
+    assert "rec.id === openId" in js, "重画列表时没有把标记带回去"
+    assert "openId = s.result.lesson_id" in js, "新生成的那条没被记成当前打开"
+
+
+def test_file_picker_is_a_real_button_with_a_small_hit_area(env):
+    """原生控件连"未选择文件"那片空白都算点击区：收成 1px，换成自己的按钮。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+
+    def rule(selector):
+        i = css.index(selector)
+        return css[i:css.index("}", i)]
+
+    # 原生控件必须真的收起来（1px + clip），不能只是"看着小"
+    sr = rule(".sr-only")
+    assert "width: 1px" in sr and "height: 1px" in sr and "clip:" in sr
+    assert 'class="sr-only"' in html.split('id="file"')[1][:80]
+    # 不再靠给原生按钮上色：那颗按钮根本不该露面
+    assert "::file-selector-button" not in css, "还在给原生 file 按钮上色，说明它仍然露在外面"
+    # 自己的按钮：蓝底白字，点击转交给 input
+    btn = rule(".pickfile")
+    assert "background: var(--accent)" in btn and "color: #fff" in btn
+    assert "$('#file').click()" in js
+    assert "$('#fname').textContent" in js
 
 
 def test_the_selected_chapter_is_darker_than_the_rest(env):

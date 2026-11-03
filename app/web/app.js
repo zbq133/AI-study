@@ -120,6 +120,15 @@ function watch(jobId, onDone) {
 
 /* ---------------- 上传与解析 ---------------- */
 
+// 原生 file 控件整块都能点（连"未选择文件"那片空白也算），所以把它收成 1px，
+// 外面用一颗真按钮触发；文件名自己画，别让人点空白也弹对话框。
+$('#pick').onclick = () => $('#file').click();
+$('#file').onchange = () => {
+  const f = $('#file').files[0];
+  $('#fname').textContent = f ? f.name : '未选择文件';
+  $('#fname').title = f ? f.name : '';
+};
+
 $('#up').onclick = async () => {
   const f = $('#file').files[0];
   if (!f) { $('#err').textContent = '先选一个 PDF。'; return; }
@@ -250,7 +259,8 @@ $('#go').onclick = async () => {
       if (s.result.reasoning_note) $('#err').textContent = s.result.reasoning_note;
       renderLesson(lesson);
       renderSource();
-      loadHistory();            // 新的排到历史最前面
+      openId = s.result.lesson_id || '';
+      loadHistory().then(() => markHistory(openId));   // 新的排到历史最前面，并标成"当前这份"
     }
   });
 };
@@ -258,6 +268,7 @@ $('#go').onclick = async () => {
 /* ---------------- 历史：重启之后还认得的那些讲义 ---------------- */
 
 let histRows = [];          // 最近一次的列表快照（管理模式下要按 id 找回来）
+let openId = '';            // 当前摊在右边的是哪一条（一列同名章节，不标看不出区别）
 let histMode = false;       // 管理模式：行变成可勾选，点行是"选"而不是"打开"
 const picked = new Set();
 
@@ -302,7 +313,8 @@ async function loadHistory() {
   }
   for (const rec of rows) {
     const b = document.createElement('button');
-    b.className = 'hist-item' + (picked.has(rec.id) ? ' picked' : '');
+    b.className = 'hist-item' + (picked.has(rec.id) ? ' picked' : '') +
+      (rec.id === openId ? ' on' : '');
     b.dataset.id = rec.id;
     b.title = `${rec.filename || ''} · ${rec.chapter} · ${rec.updated || ''}`;
     b.innerHTML = '<span class="pick"></span>' +
@@ -311,6 +323,14 @@ async function loadHistory() {
     box.appendChild(b);
   }
   paintHistBar();
+}
+
+/** 把"当前打开的是哪一份"标出来 —— 一列同名章节，不标根本不知道看的是哪条。 */
+function markHistory(id) {
+  openId = id || '';
+  for (const b of document.querySelectorAll('#histBody .hist-item')) {
+    b.classList.toggle('on', b.dataset.id === openId);
+  }
 }
 
 function togglePick(id) {
@@ -352,6 +372,7 @@ async function openLesson(id) {
   }
   const { record, lesson: L } = await r.json();
   lesson = L;
+  markHistory(id);
   renderLesson(L);
   $('#err').textContent = '';
   if (record.doc_id && record.doc_id === docId && layout) {
