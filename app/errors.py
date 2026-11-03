@@ -113,20 +113,25 @@ _BY_NAME = {
 
 
 def wrap_llm_error(exc: BaseException) -> StudyError:
-    """把 openai 抛的异常收敛成上面几种；认不出来的原样包一层。"""
+    """把 openai 抛的异常收敛成上面几种；认不出来的原样包一层。
+
+    **先看状态码，再看类名。** 状态码是更准的信号：openai 的 `APIStatusError` 是个泛型
+    父类名，503 也打这个类名，先按名字查就会把「对方在忙」说成「连不上」。
+    """
     if isinstance(exc, StudyError):
         return exc
-    cls = _BY_NAME.get(type(exc).__name__)
+    code = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    cls = None
+    if code == 401 or code == 403:
+        cls = LLMAuth
+    elif code == 429:
+        cls = LLMQuota
+    elif code == 408 or code == 504:
+        cls = LLMTimeout
+    elif isinstance(code, int) and code >= 500:
+        cls = LLMBusy
     if cls is None:
-        code = getattr(exc, "status_code", None) or getattr(exc, "status", None)
-        if code == 401 or code == 403:
-            cls = LLMAuth
-        elif code == 429:
-            cls = LLMQuota
-        elif code == 408 or code == 504:
-            cls = LLMTimeout
-        elif isinstance(code, int) and code >= 500:
-            cls = LLMBusy
+        cls = _BY_NAME.get(type(exc).__name__)
     if cls is None:
         return StudyError(f"{type(exc).__name__}: {exc}")
     return cls(str(exc)[:400])

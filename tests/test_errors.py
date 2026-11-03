@@ -31,6 +31,15 @@ def test_wraps_by_status_code_when_the_name_is_new():
     assert isinstance(wrap_llm_error(_named("WeirdError", 503)), LLMBusy)
 
 
+def test_status_code_wins_over_a_generic_class_name():
+    """APIStatusError 是泛型父类名：503 也打这个名字，先按名字查会说成「连不上」。"""
+    assert isinstance(wrap_llm_error(_named("APIStatusError", 503)), LLMBusy)
+    assert isinstance(wrap_llm_error(_named("InternalServerError", 500)), LLMBusy)
+    assert isinstance(wrap_llm_error(_named("APIStatusError", 429)), LLMQuota)
+    # 没有状态码时才轮到名字
+    assert isinstance(wrap_llm_error(_named("APIConnectionError")), LLMUnavailable)
+
+
 def test_unknown_error_keeps_its_own_text():
     err = wrap_llm_error(_named("WeirdError", 418))
     assert type(err) is StudyError

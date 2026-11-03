@@ -2,7 +2,7 @@ import re
 import time
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 import pytest
 from fastapi.testclient import TestClient
 

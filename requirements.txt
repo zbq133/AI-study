@@ -1,6 +1,8 @@
 pydantic>=2.5
 openai>=1.40
-PyMuPDF>=1.24
+# 代码里写的是 `import pymupdf`（旧的 fitz 名字已被官方标记弃用），
+# 而 PyMuPDF 从 1.24.3 起才提供 pymupdf 这个顶层模块名，下限别往回退。
+PyMuPDF>=1.24.3
 python-dotenv>=1.0
 pytest>=8.0
 fastapi>=0.110

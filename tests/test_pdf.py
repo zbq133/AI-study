@@ -1,4 +1,7 @@
-import fitz
+import re
+from pathlib import Path
+
+import pymupdf as fitz
 import pytest
 
 from app.errors import Cancelled
@@ -402,3 +405,15 @@ def test_a_line_that_also_appears_mid_page_is_not_treated_as_a_header(tmp_path):
     doc.close()
     ir = extract_ir(path, ocr=False)
     assert "Key Findings" in "\n".join(b.text for b in ir.blocks)
+
+
+def test_requirements_pin_a_pymupdf_that_has_the_pymupdf_module():
+    """`app/pdf.py` 写的是 `import pymupdf`，这个顶层模块名从 PyMuPDF 1.24.3 才有。
+
+    下限写成 >=1.24 时，别人照 requirements 装到 1.24.0 会直接 ImportError，
+    而且报的是「app 起不来」，很难想到是版本下限的问题。
+    """
+    req = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(encoding="utf-8")
+    m = re.search(r"PyMuPDF>=([\d.]+)", req, re.I)
+    assert m, req
+    assert tuple(int(x) for x in m.group(1).split(".")) >= (1, 24, 3)

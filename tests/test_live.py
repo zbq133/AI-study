@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-import fitz
+import pymupdf as fitz
 import pytest
 from dotenv import load_dotenv
 
