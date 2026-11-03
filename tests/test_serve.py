@@ -159,7 +159,62 @@ def test_colors_all_come_from_the_palette(env):
         assert css.count(f"var({var})") >= 2, var
     # 浅色主题是覆盖变量，不许重复定义规则（那样会越改越乱）
     light = re.search(r":root\[data-theme=\"light\"\]\s*\{([^}]*)\}", css).group(1)
-    assert "--bg:#f6f7f9" in light.replace(" ", "")
+    assert "--bg:#eef1f4" in light.replace(" ", "")
+
+
+def _luminance(hex_color):
+    """相对亮度，用来算对比度（WCAG 的公式，够判断"淡不淡"了）。"""
+    h = hex_color.lstrip("#")
+    chans = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in chans]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def _contrast(a, b):
+    la, lb = _luminance(a), _luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_light_theme_text_is_dark_enough_to_read(env):
+    """浅色主题下正文和次要文字都要够黑 —— 之前那套灰字在白底上读得眼睛疼。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    light = dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", re.search(
+        r":root\[data-theme=\"light\"\]\s*\{([^}]*)\}", css).group(1)))
+    for panel in ("panel", "bg"):        # 讲义栏和页面底色都要够白，正文才压得住
+        for name, need in (("fg", 10.0), ("dim", 7.0), ("dim2", 6.0), ("dim3", 5.0)):
+            got = _contrast(light[name], light[panel])
+            assert got >= need, f"{name} 在 {panel} 上只有 {got:.1f}:1，要 ≥{need}"
+
+
+def test_settings_button_is_big_enough_to_hit(env):
+    """左下角那颗钉子要够大，不然要拿鼠标找。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    gear = re.search(r"\.gear\s*\{([^}]*)\}", css)
+    assert gear, "没有 .gear 规则"
+    size = float(re.search(r"font-size:\s*([\d.]+)px", gear.group(1)).group(1))
+    pad = re.search(r"padding:\s*([\d.]+)px\s+([\d.]+)px", gear.group(1))
+    assert size >= 16, f"⚙ 才 {size}px"
+    assert pad and float(pad.group(1)) >= 10 and float(pad.group(2)) >= 18, gear.group(1)
+    label = re.search(r"\.gear\s+span\s*\{([^}]*)\}", css)
+    assert label and float(re.search(r"font-size:\s*([\d.]+)px", label.group(1)).group(1)) >= 14
+
+
+def test_model_can_be_picked_from_a_real_dropdown(env):
+    """模型得能点着换：datalist 不出下拉，只能手打，等于换不了。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+        css = client.get("/static/app.css").text
+    assert '<select id="setModel">' in html, "模型还是个输入框"
+    assert "datalist" not in html.lower(), "还留着 datalist"
+    assert 'id="setModelFree"' in html, "手动填写没有入口"
+    assert "MANUAL" in js and "pickedModel" in js
+    assert "sel.value = current" in js or "sel.value" in js, "没把当前模型选上"
+    # 新下拉要有样式，否则是浏览器默认的丑陋白块
+    assert re.search(r"\.field\s+input,\s*\.field\s+select\s*\{", css), "select 没收进字段样式"
 
 
 def test_source_column_can_be_collapsed(env):

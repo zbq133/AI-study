@@ -534,14 +534,38 @@ function paintEfforts(current) {
   });
 }
 
-function fillModels(models) {
-  const dl = $('#modelList');
-  dl.innerHTML = '';
-  (models || []).forEach(id => {
+const MANUAL = '__manual__';
+
+function fillModels(models, current) {
+  const sel = $('#setModel');
+  const list = (models || []).slice();
+  if (current && list.indexOf(current) < 0) list.unshift(current);   // 当前这个永远要能选中
+  sel.innerHTML = '';
+  list.forEach(id => {
     const o = document.createElement('option');
     o.value = id;
-    dl.appendChild(o);
+    o.textContent = id;
+    sel.appendChild(o);
   });
+  const manual = document.createElement('option');
+  manual.value = MANUAL;
+  manual.textContent = '手动填写…';
+  sel.appendChild(manual);
+  sel.value = current || (list.length ? list[0] : MANUAL);
+  const isManual = sel.value === MANUAL;
+  $('#setModelFree').classList.toggle('hide', !isManual);
+  if (isManual) $('#setModelFree').value = '';
+}
+
+$('#setModel').addEventListener('change', () => {
+  const manual = $('#setModel').value === MANUAL;
+  $('#setModelFree').classList.toggle('hide', !manual);
+  if (manual) $('#setModelFree').focus();
+});
+
+function pickedModel() {
+  const sel = $('#setModel').value;
+  return sel === MANUAL ? $('#setModelFree').value.trim() : sel;
 }
 
 function paintSettings(payload) {
@@ -551,14 +575,13 @@ function paintSettings(payload) {
   $('#setKey').placeholder = s.has_key
     ? `已保存 ${s.key_hint}，留空就不改`
     : '粘贴密钥';
-  $('#setModel').value = s.model || '';
   $('#srcUrl').textContent = SOURCE_TEXT[s.source.base_url || ''] || '';
   $('#srcKey').textContent = s.has_key
     ? `已保存 ${s.key_hint} · ${SOURCE_TEXT[s.source.api_key || ''] || ''}`
     : '还没有密钥';
   $('#srcModel').textContent = SOURCE_TEXT[s.source.model || ''] || '';
+  fillModels(payload.models, s.model);
   paintEfforts(s.reasoning_effort);
-  fillModels(payload.models);
   $('#setMsg').textContent = payload.models && payload.models.length
     ? `接入地址上有 ${payload.models.length} 个模型` : '';
 }
@@ -590,7 +613,7 @@ document.addEventListener('keydown', e => {
 async function saveSettings(extra) {
   const body = Object.assign({
     base_url: $('#setUrl').value.trim(),
-    model: $('#setModel').value.trim(),
+    model: pickedModel(),
   }, extra || {});
   const key = $('#setKey').value.trim();
   if (key) body.api_key = key;            // 留空 = 不动已保存的
@@ -623,9 +646,9 @@ $('#setTest').onclick = async () => {
   $('#setMsg').textContent = '问一下模型列表……（会先把上面的地址和密钥存下来）';
   try {
     await saveSettings();
-    const n = $('#modelList').options.length;
-    $('#setMsg').textContent = n
-      ? `拿到 ${n} 个模型，点「模型」输入框能选`
+    const n = $('#setModel').options.length - 1;   // 减去"手动填写…"
+    $('#setMsg').textContent = n > 0
+      ? `拿到 ${n} 个模型，在「模型」下拉里挑`
       : '没问到模型列表：地址/密钥可能不对，或者这家不提供 /models';
   } catch (e) {
     $('#setMsg').textContent = String(e.message || e);
