@@ -486,3 +486,30 @@ applyTheme）都必须是 `'light'`，且不许再出现 `t.mode || 'dark'`。
 
 `:focus-visible` 是"键盘来的时候才成立"的那个状态：鼠标点不给框，Tab 走过来给一圈
 蓝色。只写 `outline: none` 会把键盘用户的眼睛也一起关掉，那是拿可用性换好看。
+## 2026-11-04 补记：连点两下会把整行刷成蓝底
+
+现象：点左栏的条目、点按钮、点顶栏，点第二下时整行文字突然变成蓝底白字，
+像一层洗不掉的残影；有时候滚一下才恢复。
+
+根因是**浏览器的文本选择**，不是重绘问题：两次点击间隔够短就是双击，
+而双击的默认语义是"选中一个词/一整块文本"。`body` 上没有任何 `user-select` 声明，
+所以整个应用界面都是可选文本 —— 这在文档站是对的，在应用界面上是错的。
+
+修法是**分层放行**，不是全局关掉：
+
+    body, .top, .colhead, .hist-item, .toc-item, .pick, .tabs .tab, …
+    button, .ref, .opt, .qbar, .histbar, .meta { user-select: none; }
+
+    #lessonBody .md, #lessonBody .md *, #sourceBody .blk, #sourceBody .blk *, .qans …
+    { user-select: text; }
+
+    input, textarea, select { user-select: text; }
+
+- **不能用 `* { user-select: none }` 一刀切**：讲义正文、原文、题目解析是用户真要复制走的
+  东西，而且 KaTeX 会把一条公式拆成十几个 `<span>`，先禁父级再放开父级是选不中公式的，
+  必须连子元素一起放开（`#lessonBody .md *`）。
+- 输入框单独放开，否则设置界面里连密钥都选不中、也复制不了。
+- 顺手把 `-webkit-tap-highlight-color` 设成透明：鼠标/触屏按下时那层灰底在这套浅色配色里
+  同样会被当成"残影"。
+- 复审时发现的一条：`.qans` 里的"原文 pN"按钮和 `.opt` 选项都在正文容器里，会继承"可选"，
+  所以它们又被单独禁了一次 —— 否则点选项时还是会选中选项文字。

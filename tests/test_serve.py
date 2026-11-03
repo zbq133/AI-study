@@ -1175,3 +1175,27 @@ def test_clicking_a_row_does_not_draw_a_black_frame(env):
         "没关掉鼠标点击的焦点环"
     assert re.search(r":focus-visible[^{]*\{[^}]*outline:\s*2px solid var\(--accent\)", css), \
         "键盘用户看不见焦点在哪了"
+
+
+def test_ui_text_is_not_selectable_but_content_still_is(env):
+    """连点两下会把整行刷成蓝底（看着像残影）：外壳禁选，讲义正文照旧可选。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+
+    def rule(selector):
+        i = css.index(selector)
+        return css[i:css.index("}", i)]
+
+    shell = rule("body, .top, .colhead")
+    assert ".hist-item" in shell and "user-select: none" in shell
+    # 按钮/标签这些"点了会连击"的元素单独再禁一次：它们有些挂在正文区里
+    assert "user-select: none" in rule("button, .ref, .opt")
+    # 外壳那条不能以 * 开头：一刀切会把公式和题目里的行内元素一起禁掉
+    assert shell.lstrip().startswith("body, .top")
+
+    content = rule("#lessonBody .md")
+    assert "user-select: text" in content
+    # 要连子元素一起放开：KaTeX 把公式拆成一堆 span，只放开容器等于选中不了公式
+    assert "#lessonBody .md *" in css
+    assert "user-select: text" in rule("#sourceBody .blk")
+    assert "user-select: text" in rule(".qans")

@@ -4,6 +4,20 @@ html, body { height: 100%; }
 body { margin: 0; font: 15px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
        background: var(--bg); color: var(--fg); display: flex; flex-direction: column; }
 
+/* ---- 什么能选、什么不能选 ---------------------------------------------
+   这是应用界面，不是一篇文章：连点两下（双击）就会把整行文字刷成蓝底，
+   看着像"残影"，点完按钮之后那一片还是花的。所以外壳一律不给选，
+   只把"内容"（讲义正文、原文、题目解析）放出来 —— 那些是真要复制走的。
+   注意别用 `* { user-select: none }`：KaTeX/习题里的行内元素会一起被禁掉。 */
+body, .top, .colhead, .hist-item, .toc-item, .pick, .tabs .tab, .seg button,
+button, .ref, .opt, .qbar, .histbar, .meta { -webkit-user-select: none; user-select: none; }
+#lessonBody .md, #lessonBody .md *, #sourceBody .blk, #sourceBody .blk *,
+.qans, .qans * { -webkit-user-select: text; user-select: text; }
+.qans .ref, .qans button { -webkit-user-select: none; user-select: none; }
+input, textarea, select { -webkit-user-select: text; user-select: text; }
+/* 触屏/鼠标按下时那层灰色高亮也一并关掉，它在这套配色里同样像残影 */
+* { -webkit-tap-highlight-color: transparent; }
+
 /* ---- 顶栏 ---- */
 .top { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
        border-bottom: 1px solid var(--line); background: var(--top); flex: 0 0 auto;
