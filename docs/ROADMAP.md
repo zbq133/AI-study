@@ -255,10 +255,22 @@ no-cache、越界 404、类型不随系统猜测变）；变异四条全部击�
 ### P1 — 用起来像个产品
 
 #### P1-1 三栏界面 + 原文高亮联动
-详见 §6.2 / §6.3。这是整个前端的主菜。
+
+**✅ 已完成**（方案 A：文字版原文，不是 pdf.js）。详见 §6.2 / §6.3。
+
+- 后端加 `GET /api/docs/{id}/layout?pages=11,13-15`，把原文按页摊开成
+  `[{page, blocks:[{id, kind, text, level}]}]`，块 id 与 `source_ref.blocks` 同一套编号。
+  不传 `pages` 就是全部（15 页 / 680 块约 200 KB，本地够用）。
+- 前端三栏：左目录（点一下切章）、中讲义（`explanation_md` 走一个 40 行的极简
+  Markdown 渲染：段落 / 标题 / 列表 / 粗体 / 行内代码，`$…$` 原样留着不解释）、
+  右原文（本章页 + 所有出处落在的页）。
+- 讲义里每条 `source_refs` 变成一枚「原文 pN」chip，点它：先清掉旧高亮，再给
+  `blocks` 里所有块加 `.hl`，滚第一块到视口中间。块 id 直接当 `data-id` 用。
+- 实测：15 页综述解析出 680 块，layout 也是 680 块；拿上一份讲义的 **37 条出处**
+  去 layout 里查，**一条都不缺**。
 
 #### P1-2 习题自测模式
-详见 §6.4。
+详见 §6.4。现在只把题干/选项/答案摊开显示，还不能点选判分。
 
 #### P1-3 生成可以取消
 现在点"生成"之后只能干等 45 秒，中途反悔没有出口。
@@ -448,7 +460,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 | 0 | `GET /static/{name}` 发 `app/web/` 里的 css/js | ✅ P0-2 已完成 | 新增 |
 | 1 | `SourceRef` 加 `blocks: list[str]`、`bbox` | ✅ P0-1 已完成 | 否（有默认值） |
 | 2 | `_reading_order_ok` → `locate_quote` 返回位置 | ✅ P0-1 已完成 | 内部函数，不影响外部 |
-| 3 | `GET /api/docs/{id}/layout` 返回本章页的 blocks | P1-1 | 新增 |
+| 3 | `GET /api/docs/{id}/layout` 返回本章页的 blocks | ✅ P1-1 已完成 | 新增 |
 | 4 | `POST /api/jobs/{id}/cancel` | P1-3 | 新增 |
 | 5 | `GET /api/lessons` 列表 / `GET /api/lessons/{id}` | P0-3 | 新增 |
 | 6 | `on_step` 增加 `stage="verify"` / `"ocr"` | 6.5 | 否 |

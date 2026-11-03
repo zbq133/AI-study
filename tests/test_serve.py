@@ -219,3 +219,42 @@ def test_lesson_job_writes_a_lesson(doc_pdf, monkeypatch):
     ref = result["lesson"]["sections"][0]["source_refs"][0]
     assert ref["blocks"], ref
     assert ref["bbox"] is not None, ref
+
+def test_layout_returns_blocks_with_ids(env, doc_pdf):
+    """原文按页摊开，块 id 要和讲义里 source_ref.blocks 用同一套编号。"""
+    with TestClient(serve.app) as client:
+        doc_id, _ = _parsed(client, doc_pdf)
+        r = client.get(f"/api/docs/{doc_id}/layout")
+    assert r.status_code == 200
+    pages = r.json()["pages"]
+    assert pages and pages[0]["page"] == 1
+    first = pages[0]["blocks"][0]
+    assert first["id"] and first["text"]
+    assert first["kind"] in {"heading", "para", "list", "formula", "table",
+                             "figure", "caption"}
+
+
+def test_layout_page_filter_keeps_only_the_asked_pages(env, doc_pdf):
+    with TestClient(serve.app) as client:
+        doc_id, _ = _parsed(client, doc_pdf)
+        one = client.get(f"/api/docs/{doc_id}/layout?pages=1").json()["pages"]
+        none = client.get(f"/api/docs/{doc_id}/layout?pages=9").json()["pages"]
+    assert [p["page"] for p in one] == [1]
+    assert none == []
+
+
+def test_layout_before_parse_is_409(env, doc_pdf):
+    """没解析就没有块，别让前端拿到空壳当成功。"""
+    with TestClient(serve.app) as client:
+        doc_id = _upload(client, doc_pdf).json()["doc_id"]
+        r = client.get(f"/api/docs/{doc_id}/layout")
+    assert r.status_code == 409
+
+
+def test_layout_rejects_a_silly_page_spec(env, doc_pdf):
+    with TestClient(serve.app) as client:
+        doc_id, _ = _parsed(client, doc_pdf)
+        bad = client.get(f"/api/docs/{doc_id}/layout?pages=abc")
+        huge = client.get(f"/api/docs/{doc_id}/layout?pages=1-9999")
+    assert bad.status_code == 400
+    assert huge.status_code == 400

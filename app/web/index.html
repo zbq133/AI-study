@@ -6,49 +6,46 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<div class="wrap">
-<h1>AI Study</h1>
-<div class="sub">上传课件 → 选一章 → 生成不复述原文的讲义，和答案经过独立验证的习题。</div>
 
-<div class="card">
-  <h2>1 · 课件</h2>
+<header class="top">
+  <span class="brand">AI Study</span>
   <input type="file" id="file" accept=".pdf">
-  <div class="row" style="margin-top:12px">
-    <button id="up">上传并解析</button>
-    <span class="meta" id="upMeta"></span>
-  </div>
-  <div class="bar hide" id="pBarWrap"><i id="pBar"></i></div>
-  <div class="meta" id="pStage"></div>
-  <div class="meta" id="pDetail"></div>
-  <div class="err" id="pErr"></div>
-</div>
-
-<div class="card hide" id="pickCard">
-  <h2>2 · 选章节</h2>
-  <label for="sec">章节（页码与字数来自解析结果）</label>
-  <select id="sec"></select>
-  <label for="nq">出几道题</label>
+  <button id="up">上传并解析</button>
+  <span class="meta" id="upMeta"></span>
+  <span class="sep"></span>
+  <select id="sec" class="hide" title="章节"></select>
+  <label class="inline" for="nq">题数</label>
   <input type="number" id="nq" value="3" min="1" max="10">
-  <div class="row" style="margin-top:14px">
-    <button id="go">生成讲义</button>
-    <span class="meta" id="goMeta"></span>
-  </div>
-</div>
+  <button id="go" disabled>生成讲义</button>
+  <span class="meta" id="goMeta"></span>
+</header>
 
-<div class="card hide" id="runCard">
-  <h2>3 · 进度</h2>
-  <div class="bar"><i id="bar"></i></div>
-  <div class="meta" id="stage">—</div>
-  <div class="meta" id="detail"></div>
-  <div class="err" id="err"></div>
+<div class="bar hide" id="pBarWrap"><i id="pBar"></i></div>
+<div class="statusline hide" id="runLine">
+  <span id="stage">—</span>
+  <span class="meta" id="detail"></span>
 </div>
+<div class="err" id="err"></div>
 
-<div class="card hide" id="outCard">
-  <h2>4 · 结果</h2>
-  <div class="meta" id="summary"></div>
-  <div id="preview"></div>
-</div>
-</div>
+<main class="cols">
+  <aside class="col" id="toc">
+    <div class="colhead">目录</div>
+    <div id="tocBody" class="pad"></div>
+  </aside>
+  <section class="col" id="lesson">
+    <div class="colhead">讲义</div>
+    <div id="lessonBody" class="pad">
+      <p class="hint">上传课件 → 选一章 → 生成。</p>
+    </div>
+  </section>
+  <section class="col" id="source">
+    <div class="colhead">原文 <span class="meta" id="srcMeta"></span></div>
+    <div id="sourceBody" class="pad">
+      <p class="hint">生成后这里显示本章原文，点讲义里的「出处」会跳过来并高亮。</p>
+    </div>
+  </section>
+</main>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

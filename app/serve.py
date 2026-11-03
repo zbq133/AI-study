@@ -17,7 +17,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .llm import LLM
-from .pdf import NoTextLayer, extract_ir
+from .pdf import NoTextLayer, extract_ir, page_block_map
 from .pipeline import build_lesson
 from .schema import build_sections, is_reference_title
 
@@ -155,6 +155,31 @@ def _do_parse(job: Job, doc_id: str) -> None:
     job.advance(99, "解析完成")
 
 
+def _parse_pages(spec: str) -> Optional[set[int]]:
+    """把 `11,13-15` 解析成页号集合。空串表示"全都要"。"""
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    want: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, _, b = part.partition("-")
+            if not (a.strip().isdigit() and b.strip().isdigit()):
+                raise HTTPException(400, "页号要写成 11 或 11-13")
+            lo, hi = int(a), int(b)
+            if lo > hi or hi - lo > 200:
+                raise HTTPException(400, "页号区间不对")
+            want.update(range(lo, hi + 1))
+        elif part.isdigit():
+            want.add(int(part))
+        else:
+            raise HTTPException(400, "页号要写成 11 或 11-13")
+    return want
+
+
 def _safe(name: str) -> str:
     bad = '<>:"/\\|?*'
     return "".join("_" if c in bad else c for c in name).strip()[:80]
@@ -256,6 +281,30 @@ async def parse(doc_id: str) -> dict:
     job = _new_job("parse", doc["filename"])
     _spawn(job, _do_parse, doc_id)
     return {"job_id": job.id, "cached": False}
+
+
+@app.get("/api/docs/{doc_id}/layout")
+async def layout(doc_id: str, pages: str = "") -> dict:
+    """原文按页摊开，前端拿它做"点出处高亮那一行"。
+
+    块 id 和讲义里 `source_ref.blocks` 是同一套编号，所以前端只需要按 id 找。
+    """
+    doc = DOCS.get(doc_id)
+    if doc is None:
+        raise HTTPException(404, "没有这个 doc_id，先上传")
+    ir = doc["ir"]
+    if ir is None:
+        raise HTTPException(409, "还没解析，先调 /parse")
+    want = _parse_pages(pages)
+    per = page_block_map(ir)
+    out = []
+    for pno in sorted(per):
+        if want is not None and pno not in want:
+            continue
+        out.append({"page": pno,
+                    "blocks": [{"id": b.id, "kind": b.kind, "text": b.text,
+                                "level": b.level} for b in per[pno]]})
+    return {"doc_id": doc_id, "pages": out}
 
 
 class LessonReq(BaseModel):
