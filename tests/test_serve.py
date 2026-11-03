@@ -266,6 +266,34 @@ def test_history_bar_fits_inside_the_left_column(env):
     assert re.search(r"#histDel\s*\{[^}]*margin-left:\s*auto", css), "按钮要靠右"
 
 
+def test_left_column_rows_are_tall_enough_to_hit(env):
+    """左栏每条太扁：6px 上下内边距 + 12.5px 字，滚着看像一坨。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    for sel, minimum in ((".hist-item", 9), (".toc-item", 9)):
+        rule = re.search(sel.replace(".", r"\.") + r"\s*\{([^}]*)\}", css)
+        assert rule, f"{sel} 规则没了"
+        body = rule.group(1)
+        pad = re.search(r"padding:\s*(\d+)px\s+\d+px", body)
+        assert pad and int(pad.group(1)) >= minimum, f"{sel} 上下内边距只有 {pad and pad.group(1)}px"
+        size = re.search(r"font-size:\s*([\d.]+)px", body)
+        assert size and float(size.group(1)) >= 13, f"{sel} 字号只有 {size and size.group(1)}px"
+
+
+def test_buttons_spring_back_when_pressed(env):
+    """按钮要有按下去的手感：过渡走回弹曲线，按下缩一点，松开弹回来。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    assert re.search(r"--spring:\s*cubic-bezier\(", css), "没有定义回弹曲线"
+    assert re.search(r"transition:[^;]*transform[^;]*var\(--spring\)", css), "transform 没走回弹曲线"
+    assert re.search(r"button:not\(:disabled\):active\s*\{[^}]*transform:\s*scale\(", css)
+    # 系统开了"减少动态效果"就得老实待着
+    assert "prefers-reduced-motion: reduce" in css, "没有尊重减少动态效果"
+    start = css.index("@media (prefers-reduced-motion: reduce)")
+    block = css[start:css.index("\n}", start)]
+    assert "transition: none" in block and "transform: none" in block, block
+
+
 def test_source_column_starts_collapsed_and_text_keeps_three_quarters(env):
     """默认收起原文（先看讲义），收起时正文只占四分之三宽 —— 一行拉满读不下去。"""
     with TestClient(serve.app) as client:

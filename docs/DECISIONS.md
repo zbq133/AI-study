@@ -408,3 +408,19 @@ devnull（让 `.isatty()` 调得动），`uvicorn.Config(log_config=None)` 让�
   只改一处栅格、去掉 margin-left）全部被杀。
 - 教训：CSS 里的布局常数一旦被"内容变多"撑破，就会表现成"某个控件坏了"。
   常量抽成变量不是为了好看，是为了让测试能盯住它。
+## 2026-11-03 补记：左栏行高与按钮的弹性
+
+**1. 左栏每条太扁**：`.hist-item` 是 `padding: 6px 14px` + `12.5px` 字，一列五条挤成一片，
+滚起来分不清哪条是哪条。改成 `10px 14px` + `13px` + `line-height: 1.55`；目录 `.toc-item`
+同步到 `11px 14px` + `13px`。历史区高度上限也从 34% 放到 38%，腾出的空间给行高。
+
+**2. 弹性只走 transform**：`--spring: cubic-bezier(.34, 1.56, .64, 1)`（先压过头再回弹），
+按下 `scale(.94)`（列表项 `.96`），松开沿这条曲线回去。**不动 width/height/margin** ——
+那些会触发重排，一列几十条按钮同时重排会掉帧。
+
+**3. 必须尊重 `prefers-reduced-motion`**：系统开了"减少动态效果"就把 transition 和
+`:active` 的 transform 一起关掉。前庭敏感的人会被满屏回弹晃到，这不是可选优化。
+
+**4. 断言要盯"值"不是"存在"**：第一版测 `reduced` 那段只写了 `"transform: none" in css`
+（从 media query 位置切到文件尾），结果把 `transform: none` 那行删掉，测试照样绿 ——
+因为切出来的尾巴里还有别的匹配。改成截到 `\n}` 为止的块再断言，才真正杀掉这条变异。
