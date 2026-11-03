@@ -281,33 +281,36 @@ no-cache、越界 404、类型不随系统猜测变）；变异四条全部击�
   全角 ＡＣ 也认、填空题先掏空白再比、`/` 或 `|` 分隔的多种写法命中任意一个都算对。
 - 填空题（`type: fill`）用输入框，参考答案按文本比对。
 
-#### P1-3 生成可以取消
+#### P1-3 生成可以取消 ✅（2026-11-03 已做）
 现在点"生成"之后只能干等 45 秒，中途反悔没有出口。
-线程池里的任务没法直接 cancel，需要一个协作式中断：
+
+落地形态（和原计划不同，比"在 `on_step` 里查标志"更彻底）：
 
 ```python
-class Job:
-    def __init__(...):
-        self.cancelled = False
+# app/llm.py —— 每一层都能自己判断该不该停
+LLM(..., max_calls=40, max_tokens=200_000, should_stop=job.cancel_evt.is_set)
 
-def check():                     # 在 on_step 里调
-    if job.cancelled:
-        raise GenerationCancelled
-
-# build_lesson 的 step() 里加一句 check
+def _check(self):
+    if self.should_stop is not None and self.should_stop():
+        raise Cancelled()
+    if self.max_calls is not None and self.calls >= self.max_calls:
+        raise BudgetExceeded(...)          # kind="budget"，hint 指向环境变量
 ```
 
-`POST /api/jobs/{id}/cancel` 置标志位，下次 `step()` 抛出 → 已消耗的调用费不会退，但剩下的 3/5 节不用再烧。
+- `Job` 上挂 `threading.Event()`，`POST /api/jobs/{id}/cancel` 只做一件事：`set()`。
+- 检查放在**调用之前**，所以停下时不会再多发一次请求；代价是 token 上限最多超出一次调用的量。
+- 解析路径（`extract_ir(..., should_stop=...)`）同样每页查一次 —— OCR 一本扫描件要一两分钟，只有生成能停是不够的。
+- 上限来自 `LESSON_MAX_CALLS`（默认 40）/ `LESSON_MAX_TOKENS`（默认 200000），写歪了退回默认值，不让服务起不来。
+- 前端 `watch()` 里统一挂"停"按钮，任务结束自动收起；对已结束的任务点"停"返回 200 但不改状态。
 
-#### P1-4 顶部显示成本
+#### P1-4 顶部显示成本 ✅（部分，2026-11-03）
 每次生成 13 次调用、输入 19136 / 输出 6883 tokens。按 deepseek-chat 的价格算一下大概几毛钱。
-用户看不见成本就不会有节制地用，加到进度条旁边一行小字即可（数据 `job.snapshot()` 里已经有）。
+进度条旁边那行已经有 `模型调用 N 次`（`job.snapshot()` 里的 `calls`），**还差把 token 折成钱显示出来**。
 
-#### P1-5 错误要能看懂
-现在失败直接把 `str(exc)` 甩出来。至少分三类给人话：
-- 没配 key → "去 `.env` 里填 `LLM_API_KEY`"
-- PDF 没文字层且 OCR 关着 → "这是扫描件，需要开 OCR（一页约 10 秒）"
-- 模型返回 JSON 连续校验失败 → "模型不稳定，重试一次"
+#### P1-5 错误要能看懂 ✅（2026-11-03 已做）
+落地成 `app/errors.py`：`kind`（程序认）+ `title`/`hint`（人看）+ `detail`（排查）。
+`wrap_llm_error` 按**类名**和 `status_code` 两道判据把 openai 的一堆异常收敛成 auth/quota/timeout/down 四种
+（不 import openai 的具体类，换版本不会连带崩掉）；`describe()` 给前端结构化的 `error_info`。
 
 ---
 
@@ -509,12 +512,14 @@ Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去�
 
 | 严重度 | 问题 | 位置 | 状态 |
 |---|---|---|---|
-| P0 | `SourceRef` 没有 bbox，前端无法高亮 | `app/schema.py:71` | 待做（P0-1） |
+| P0 | ~~`SourceRef` 没有 bbox，前端无法高亮~~ | `app/schema.py:71` | 已做（`blocks` + `bbox`，e1e28a7） |
 | ~~P1~~ | ~~讲义里的 `$公式$` 在界面上原样显示~~ | `app/web/` | 已接本地 KaTeX（离线 vendor） |
-| P1 | 生成不能取消 | `app/serve.py` | 待做 |
+| P1 | ~~生成不能取消~~ | `app/serve.py` | 已做（`cancel_evt` + 调用前查，P1-3） |
+| P1 | ~~错误只有一句 traceback~~ | `app/errors.py` | 已做（kind + title + hint，P1-5） |
 | P1 | 历史记录无索引，重启即丢 | `out/*.json` | 待做 |
 | P1 | 出题阶段（30 秒）进度不动 | `app/pipeline.py:136` | 待做 |
 | P1 | OCR 阶段无页级进度 | `app/ocr.py` | 待做 |
+| P1 | 成本只显示调用次数，没折成钱 | `app/web/app.js` | 待做（P1-4 余下部分） |
 | P2 | PPT 场景 quote 只有 9–15 字 | 校验语义 | 待定方案（P2-1） |
 | P2 | 公式 OCR 错认（`λ`→`入`） | `app/ocr.py` | 待定方案（P2-2） |
 | P2 | `knowledge_point` 可能长到 48 字 | prompt | 待收窄 |

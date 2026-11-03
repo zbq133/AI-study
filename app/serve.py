@@ -49,6 +49,21 @@ WEB_TYPES = {".css": "text/css; charset=utf-8",
 MAX_UPLOAD = 80 * 1024 * 1024
 REQUIRED = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
 
+#: 一次生成最多调几次、最多烧多少 token —— 手滑跑整本时兜底。
+DEFAULT_MAX_CALLS = 40
+DEFAULT_MAX_TOKENS = 200_000
+
+
+def _limit(name: str, default: int) -> int:
+    """从环境变量读一个正整数上限；写歪了就退回默认值，别让服务起不来。"""
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
 # 解析和生成都占 CPU/网络，两个线程够用；生成再加一把锁，一次只跑一份，
 # 免得不小心把 key 的额度并发打光。
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -73,6 +88,7 @@ class Job:
         self.result: Any = None
         self.error = ""
         self.error_info: dict = {}          # kind/title/hint/detail，前端照着说人话
+        self.cancel_evt = threading.Event()  # 前端点"停"就 set()
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -84,6 +100,7 @@ class Job:
                 "state": self.state, "stage": self.stage, "percent": self.percent,
                 "message": self.message, "error": self.error,
                 "error_info": self.error_info,
+                "cancellable": self.state in ("queued", "running"),
                 "elapsed": round((self.t1 or time.time()) - self.t0, 1),
                 "calls": self.calls, "prompt_tokens": self.prompt_tokens,
                 "completion_tokens": self.completion_tokens,
@@ -147,7 +164,7 @@ def _parse_result(ir) -> dict:
 def _do_parse(job: Job, doc_id: str) -> None:
     doc = DOCS[doc_id]
     job.advance(10, "解析 PDF", "文字层优先，没有文字的页走 OCR（一页约 10 秒）")
-    ir = extract_ir(doc["path"], ocr_cache=OUT_DIR / "ocr")
+    ir = extract_ir(doc["path"], ocr_cache=OUT_DIR / "ocr", should_stop=job.cancel_evt.is_set)
     doc["ir"] = ir
     job.advance(80, "切分章节")
     job.result = _parse_result(ir)
@@ -193,7 +210,10 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
 
     ir = DOCS[doc_id]["ir"]
     llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"],
-              os.environ["LLM_MODEL"])
+              os.environ["LLM_MODEL"],
+              max_calls=_limit("LESSON_MAX_CALLS", DEFAULT_MAX_CALLS),
+              max_tokens=_limit("LESSON_MAX_TOKENS", DEFAULT_MAX_TOKENS),
+              should_stop=job.cancel_evt.is_set)
 
     def on_step(info: dict) -> None:
         stage = info.get("stage")
@@ -325,6 +345,18 @@ async def create_lesson(req: LessonReq) -> dict:
     job = _new_job("lesson", req.chapter)
     _spawn(job, _do_lesson, req.doc_id, req.chapter, n)
     return {"job_id": job.id}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str) -> dict:
+    """叫停一条任务。已经跑完的任务点它不报错，只是什么都不发生。"""
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "没有这个 job_id")
+    job.cancel_evt.set()
+    if job.state in ("queued", "running"):
+        job.stage = "正在停"
+    return {"ok": True, "job_id": job_id, "state": job.state}
 
 
 @app.get("/api/jobs/{job_id}")

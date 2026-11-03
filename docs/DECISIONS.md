@@ -139,3 +139,17 @@ P1-1。前端从"一个表单 + 一个 `<pre>`"变成三栏：左目录、中讲
 5. **没作答时提示"先选一个"，不算答错。** 判错和没答是两件事，混在一起会让人以为自己选错了。
 
 验收：87 条测试全绿（原 76 + 判分 7 + 静态资源 4）；变异四条全部击杀（多选不排序 / 填空不掏空白 / 静态路由退回单段 / MIME 表去掉 woff2）；真服务下 `/` `/static/grade.js` `/static/vendor/katex/katex.min.js` `/static/vendor/katex/fonts/KaTeX_Main-Regular.woff2` 全部 200 且 MIME 正确；用 vendored 的 KaTeX 在 node 里渲染 `\lambda = u T = \frac{u}{\nu}`，产出 `mfrac` 与希腊字母，坏公式返回 `katex-error` 而不抛异常。
+
+## 2026-11-03 补记：失败要说人话、任务要能停
+
+1. **错误分类单独成模块**（pp/errors.py）：StudyError 带 kind / 	itle / hint 三个类属性，
+   子类覆盖它们。前端直接拿 error_info 显示 title + hint，detail 只在 kind == unknown 时露出来。
+   理由：原来所有失败都是一句 str(exc)，用户分不清「是不是我配置错了」和「是不是模型抽风」。
+2. **openai 的异常按类名 + status_code 双判据收敛**，不 import openai 的具体类。理由：它换版本改类名很常见，
+   而 HTTP 状态码是稳的；两条判据任一命中就能给出人话。
+3. **取消与成本闸都放在 LLM._check() 里，且在调用之前**：should_stop() 为真抛 Cancelled，
+   次数/token 到顶抛 BudgetExceeded。代价是 token 上限最多超出一次调用的量，换来的是「停下时立刻停，
+   不再多花一次钱」。解析路径（extract_ir）每页查一次，因为 OCR 一本扫描件要一两分钟。
+4. **上限写歪了不能把服务带崩**：_limit() 读不到或不是正整数就退回默认值（LESSON_MAX_CALLS=40 /
+   LESSON_MAX_TOKENS=200000）。配置错误的表现应该是「按默认跑」而不是「起不来」。
+5. **对已结束的任务点停返回 200 但不改状态**：前端不需要先判断任务活没活，少一个竞态分支。

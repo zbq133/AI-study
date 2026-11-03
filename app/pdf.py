@@ -6,7 +6,7 @@ from pathlib import Path
 
 import fitz
 
-from .errors import BadPDF, EmptyDocument
+from .errors import BadPDF, Cancelled, EmptyDocument
 from .schema import Block, DocIR
 
 HEAD_NUM = re.compile(
@@ -255,7 +255,7 @@ def _running_lines(pages):
     return {k for k, ps in seen.items() if k not in mid and len(ps) >= need}
 
 
-def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
+def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr", should_stop=None) -> DocIR:
     """把 PDF 变成 DocIR。
 
     ocr=True 时，整页没有文字层的页面（PPT 导出的图片型课件）会走 OCR 补文字层；
@@ -274,6 +274,8 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
     raw = []
     ocr_pages = []
     for i, page in enumerate(doc):
+        if should_stop is not None and should_stop():
+            raise Cancelled("解析中断了")
         lines = _page_lines(page)
         if not lines and ocr:
             from .ocr import ocr_page_cached

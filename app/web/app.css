@@ -30,6 +30,8 @@ button.ghost { background: transparent; border-color: #2c3541; color: #9aa6b2; }
 .statusline { display: flex; gap: 12px; align-items: baseline; padding: 6px 16px;
               font-size: 12.5px; color: #9aa6b2; border-bottom: 1px solid #1e252f;
               flex: 0 0 auto; }
+#stop { margin-left: auto; padding: 3px 12px; font-size: 12px; align-self: center; }
+#stop:disabled { opacity: .45; }
 
 /* ---- 三栏 ---- */
 .cols { display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr);

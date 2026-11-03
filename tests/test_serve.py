@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import serve
+from app.errors import Cancelled
 from app.schema import (LessonSection, Outline, OutlineItem, QuizItem, QuizPack,
                         SourceRef, VerifyResult)
 
@@ -16,10 +17,11 @@ FAKE = "这句话在原文里根本不存在"
 class _FakeLLM:
     """顶替真模型：按内容作答，答对的那道题才留得下来。"""
 
-    def __init__(self, base_url="", api_key="", model=""):
+    def __init__(self, base_url="", api_key="", model="", **kw):
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self.kw = kw                       # max_calls / max_tokens / should_stop
 
     def json(self, system, user, model_cls, temperature=0.3, retries=2):
         self.calls += 1
@@ -296,3 +298,93 @@ def test_static_cannot_escape_through_a_subpath():
     with TestClient(serve.app) as client:
         r = client.get("/static/vendor/..%2F..%2Fserve.py")
     assert r.status_code == 404
+
+
+def test_parse_can_be_stopped_too(doc_pdf, monkeypatch):
+    """解析一本扫描件要一两分钟，"停"必须也能打断它，不能只对生成生效。"""
+    seen = {}
+    real = serve.extract_ir
+
+    def spy(path, **kw):
+        seen.update(kw)
+        return real(path, ocr=False)
+
+    monkeypatch.setattr(serve, "extract_ir", spy)
+    with TestClient(serve.app) as client:
+        _parsed(client, doc_pdf)
+    assert callable(seen.get("should_stop"))
+
+
+# ---------------------------------------------------------------- 取消与成本闸
+
+class _StuckLLM(_FakeLLM):
+    """一直卡在第一次调用上，直到有人点"停" —— 用来测取消真的能打断。"""
+
+    def json(self, system, user, model_cls, temperature=0.3, retries=2):
+        self.calls += 1
+        stop = self.kw.get("should_stop")
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            if stop is not None and stop():
+                raise Cancelled("停了")
+            time.sleep(0.01)
+        raise AssertionError("测试里等太久，说明取消没生效")
+
+
+def _lesson_job(client, doc_pdf):
+    doc_id, res = _parsed(client, doc_pdf)
+    r = client.post("/api/lessons",
+                    json={"doc_id": doc_id, "chapter": res["sections"][0]["title"]})
+    return r.json()["job_id"]
+
+
+def test_cancel_stops_a_running_lesson(doc_pdf, monkeypatch):
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _StuckLLM)
+    with TestClient(serve.app) as client:
+        job_id = _lesson_job(client, doc_pdf)
+        for _ in range(200):                     # 等它真的跑起来
+            if client.get(f"/api/jobs/{job_id}").json()["state"] == "running":
+                break
+            time.sleep(0.01)
+        r = client.post(f"/api/jobs/{job_id}/cancel")
+        assert r.status_code == 200 and r.json()["ok"] is True
+        snap = _wait(client, job_id)
+    assert snap["state"] == "failed"
+    assert snap["error_info"]["kind"] == "cancelled"
+    assert snap["cancellable"] is False
+
+
+def test_cancel_of_a_finished_job_is_a_no_op(doc_pdf, monkeypatch):
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        job_id = _lesson_job(client, doc_pdf)
+        _wait(client, job_id)
+        r = client.post(f"/api/jobs/{job_id}/cancel")
+    assert r.status_code == 200
+    assert r.json()["state"] == "done"           # 已经跑完了，点停也不会改状态
+
+
+def test_cancel_unknown_job_is_404():
+    with TestClient(serve.app) as client:
+        assert client.post("/api/jobs/nope/cancel").status_code == 404
+
+
+def test_cost_limits_come_from_the_environment(monkeypatch):
+    monkeypatch.setenv("LESSON_MAX_CALLS", "7")
+    monkeypatch.setenv("LESSON_MAX_TOKENS", "1234")
+    assert serve._limit("LESSON_MAX_CALLS", serve.DEFAULT_MAX_CALLS) == 7
+    assert serve._limit("LESSON_MAX_TOKENS", serve.DEFAULT_MAX_TOKENS) == 1234
+
+
+def test_a_broken_limit_falls_back_to_the_default(monkeypatch):
+    """环境变量写歪了不该让服务起不来。"""
+    monkeypatch.setenv("LESSON_MAX_CALLS", "很多")
+    assert serve._limit("LESSON_MAX_CALLS", 40) == 40
+    monkeypatch.setenv("LESSON_MAX_CALLS", "0")
+    assert serve._limit("LESSON_MAX_CALLS", 40) == 1
+    monkeypatch.delenv("LESSON_MAX_CALLS")
+    assert serve._limit("LESSON_MAX_CALLS", 40) == 40

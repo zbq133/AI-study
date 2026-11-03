@@ -97,13 +97,24 @@ function stageView(bar, stageEl, detailEl, snap) {
 }
 
 function watch(jobId, onDone) {
+  const stop = $('#stop');
+  stop.classList.remove('hide');
+  stop.disabled = false;
+  stop.textContent = '停';
+  stop.onclick = async () => {
+    stop.disabled = true;
+    stop.textContent = '停…';
+    try { await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' }); } catch (e) { /* 已经结束了 */ }
+  };
   const es = new EventSource(`/api/jobs/${jobId}/events`);
   es.onmessage = ev => {
     const snap = JSON.parse(ev.data);
     onDone.snap(snap);
-    if (snap.state === 'done' || snap.state === 'failed') { es.close(); onDone.end(snap); }
+    if (snap.state === 'done' || snap.state === 'failed') {
+      es.close(); stop.classList.add('hide'); onDone.end(snap);
+    }
   };
-  es.onerror = () => { es.close(); };
+  es.onerror = () => { es.close(); stop.classList.add('hide'); };
 }
 
 /* ---------------- 上传与解析 ---------------- */

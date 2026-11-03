@@ -1,6 +1,7 @@
 import fitz
 import pytest
 
+from app.errors import Cancelled
 from app.pdf import (NoTextLayer, _mode_size, _order, _paragraphs, _plausible_title,
                      _toc_key, extract_ir, page_text_map)
 from app.schema import build_sections
@@ -149,6 +150,32 @@ def test_extract_ir_raises_on_pdf_without_text_layer(tmp_path):
 
     with pytest.raises(NoTextLayer):
         extract_ir(path, ocr=False)
+
+
+def test_extract_ir_stops_when_told_to(tmp_path):
+    """点了"停"就不能接着一页页往下啃 —— 解析一本扫描件是一两分钟的事。"""
+    path = tmp_path / "book.pdf"
+    doc = fitz.open()
+    for i in range(3):
+        page = doc.new_page()
+        page.insert_text((40, 60), f"line {i}", fontsize=12)
+    doc.save(str(path))
+    doc.close()
+
+    with pytest.raises(Cancelled):
+        extract_ir(path, ocr=False, should_stop=lambda: True)
+
+
+def test_extract_ir_finishes_when_nobody_stops_it(tmp_path):
+    path = tmp_path / "book2.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((40, 60), "line 0", fontsize=12)
+    doc.save(str(path))
+    doc.close()
+
+    ir = extract_ir(path, ocr=False, should_stop=lambda: False)
+    assert ir.page_count == 1
 
 
 def test_ocr_fills_text_layer_of_image_only_pdf(tmp_path):
