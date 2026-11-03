@@ -18,19 +18,20 @@
 
 ---
 
-## 现在到哪了（2026-11-03，HEAD = `1acdcea`）
+## 现在到哪了（2026-11-04，HEAD = `092accb`）
 
 | 项 | 数字 |
 |---|---|
-| 代码 | `app/` 12 个模块 **2164 行**；`app/web/` 4 个文件 **1195 行** + 本地 KaTeX 548 KB |
-| 测试 | **214 passed + 3 skipped**（共 217 条，`tests/` 13 个文件） |
-| HTTP 端点 | **16 个**（上传 / 解析 / 布局 / 生成 / 取消 / 任务 / SSE / 历史 / 设置 / 探活） |
-| 提交数 | 34 |
-| 完成度 | 单人本机可用 **约 92%**；交给别人长期跑 **约 75%** |
+| 代码 | `app/` 12 个模块 **2710 行**；`app/web/` 4 个文件 **1673 行** + 本地 KaTeX 548 KB |
+| 测试 | **214 passed + 3 skipped**（共 217 条，`tests/` 12 个文件 3119 行）；行覆盖 **93%** |
+| HTTP 端点 | **17 个**（上传 / 解析 / 布局 / 生成 / 取消 / 任务 / SSE / 历史 / 批量删 / 设置 / 探活） |
+| 提交数 | 55 |
+| 完成度 | 单人本机可用 **约 95%**；交给别人长期跑 **约 82%** |
 
 **能做的事已经比"能用"多了**：三栏界面（目录 / 讲义 / 原文）、点出处高亮原文、习题先做后判、
-公式走本地 KaTeX、历史记录落 `out/index.json`、生成可取消、成本有闸、错误分门别类、
-设置界面（模型 / 思考等级 / 深色浅色自定义 / 字号 / 版本，四个标签）、原文栏可折叠、探活 + 日志 + 一键启动。
+公式走本地 KaTeX、历史记录落 `out/index.json` 并且能勾着批量删（带每条占用大小）、
+生成可取消、成本有闸、错误分门别类、设置界面**五个标签**（模型接入 / 语言风格 / 颜色 / 字号 / 版本）、
+默认浅色、原文栏默认收起且正文只占四分之三宽、探活 + 日志 + 一键启动，以及**双击即开的 Windows 客户端**。
 
 **最近一次全链路真跑**（15 页双栏综述 `12. Summary and recommendations`）：
 
@@ -41,6 +42,14 @@
 出处  36 条 source_refs 全部带 blocks + bbox（缺的 0 条）
 ```
 
+**扫描课件**（12 页 PPT，`第十章 波动.pdf`，整本 1656 字）：
+
+```
+解析  102 秒（12 页全走 OCR）→ 97 块 / 1 章「第十章」
+生成  58.9 秒 → 14 次调用 / 6 节 / 3 题全过
+已知上限：quote 只有 9–15 字（一页五六十字，切完就剩这么长）
+```
+
 ---
 
 ## 三条命令
@@ -49,6 +58,7 @@
 cd "D:\AI study"
 .\.venv\Scripts\python.exe -m pytest -q      # 必须 214 passed, 3 skipped
 .\.venv\Scripts\python.exe -m app.serve      # → http://127.0.0.1:8765（或直接跑 start.ps1）
+.\.venv\Scripts\python.exe -m app.desktop    # 客户端窗口（等价的 exe 在 dist\AI Study\）
 .\.venv\Scripts\python.exe -m app.cli "C:\path\to.pdf" 18 3   # 命令行跑一章，3 道题
 ```
 
@@ -85,7 +95,7 @@ cd "D:\AI study"
 | 1 | `docs/ROADMAP.md` | 主交接文档：§3「已经踩平的地」、§4「硬约束」、§9「已知问题」、**§11「接下来做什么」** |
 | 2 | `docs/DECISIONS.md` | 每个决定的来龙去脉（为什么段落要合并、为什么出题要喂原文、为什么 .hide 缺了一下午） |
 | 3 | `app/schema.py` | 数据模型 + 出处校验（`SourceRef.blocks/bbox`、`locate_quote`） |
-| 4 | `app/serve.py` | 16 个端点 + 任务/取消/成本闸/设置，一个文件看完全部外壳 |
+| 4 | `app/serve.py` | 17 个端点 + 任务/取消/成本闸/设置，一个文件看完全部外壳 |
 | 5 | `tests/` 里的测试名 | 217 条测试名就是"哪些行为被锁住了"的清单 |
 
 ---
@@ -94,28 +104,29 @@ cd "D:\AI study"
 
 ```
 app/
-  pdf.py      399  extract_ir：文字层 → 行 → 分栏排序(_order) → 并段落(_paragraphs) → 判标题
+  pdf.py      419  extract_ir：文字层 → 行 → 分栏排序(_order) → 并段落(_paragraphs) → 判标题
                    · 页眉页脚靠 _running_lines 跨页重复检测摘掉
                    · 图片型页面走 ocr.py；OCR 页不并段落、整本并成一章
+                   · content_id() 用文件内容 sha256 当 doc_id（换机器也认得出同一份）
   ocr.py       87  RapidOCR 懒加载，200 dpi，结果缓存到 out/ocr/<doc_id>/p<N>.json
   schema.py   257  Block/DocIR/Section/Lesson…；build_sections 切章、verify_refs 校验出处
                    · locate_quote + _merge_bbox 把 quote 映射到块 id 与矩形
-  pipeline.py 257  全流程编排：plan_outline → write_section → make_quiz → build_lesson
+  pipeline.py 281  全流程编排：plan_outline → write_section → make_quiz → build_lesson
                    · 出题必须喂原文（_render_sources），无出处/出处对不上直接丢
-                   · _solve_independently 打乱选项再解一次
-  prompts.py   60  三段 system prompt（大纲 / 讲义 / 出题+验证）
+                   · _solve_independently 打乱选项再解一次；致命错误上抛不吞
+  prompts.py  102  system prompt（大纲 / 讲义 / 出题+验证）+ 三段语言风格（style_block）
   llm.py      106  带 JSON 校验重试、错误分类、成本闸(max_calls/max_tokens)、取消、思考等级降级
-  errors.py   135  StudyError 家族：kind/title/hint，人看得懂的那种
-  settings.py 109  设置优先级 settings.json > 环境变量；永不回明文密钥
-  store.py     94  out/index.json 索引：原子写、坏索引当空、file 只取文件名防穿越
-  serve.py    586  FastAPI：17 端点、线程池任务、SSE 进度、日志、探活
-  desktop.py  200  客户端外壳：后台起 uvicorn + pywebview 原生窗口；端口复用/让让位
+  errors.py   157  StudyError 家族：kind/title/hint，人看得懂的那种；is_fatal 判"该不该中止"
+  settings.py 143  设置优先级 settings.json > 环境变量；带 mtime 缓存；永不回明文密钥
+  store.py    121  out/index.json 索引：原子写、坏索引当空、加锁、批量删、file 只取文件名防穿越
+  serve.py    720  FastAPI：17 端点、线程池任务、SSE 进度、日志、探活
+  desktop.py  218  客户端外壳：后台起 uvicorn + pywebview 原生窗口；端口复用/让位
                    · _ensure_streams()：窗口版 exe 没有控制台，sys.stdout 是 None
-  cli.py       73  命令行入口
+  cli.py       98  命令行入口
 app/web/
-  index.html  149 / app.css 234 / app.js 756 / grade.js 56（纯判分函数，node 可直接测）
+  index.html  211 / app.css 367 / app.js 1039 / grade.js 56（纯判分函数，node 可直接测）
   vendor/katex/    本地 KaTeX 0.19.1（23 个文件 548 KB，离线可用）
-tests/       3110  214 passed + 3 skipped
+tests/       3119  214 passed + 3 skipped
 ```
 
 数据流：
@@ -146,42 +157,46 @@ PDF ─extract_ir→ DocIR ─build_sections→ [Section] ─select_chapter→ �
 | 颜色栏 + 原文折叠 | 色板变量 + `localStorage` | cea7786 / 710a77c |
 | `.hide` 规则补上 | `app.css` | 2442ed5 |
 | 浅色对比度 / 按钮 / 模型下拉 | 角色变量 + `<select>` | 1acdcea |
+| 自审 11 条（doc_id 按内容、判后留解析、加锁、致命错误上抛、验魔数…） | 多处 | 9d0e49a |
+| 历史批量删（带占用大小、PDF 引用计数） | `/api/lessons/purge` + `store.delete_many` | 3372e95 |
+| 客户端 exe（pywebview + pyinstaller） | `app/desktop.py`、`build_desktop.ps1` | 95a5ef5 |
+| 设置五个标签 + 语言风格三段提示词 | `prompts.style_block` + `#setStyle` | 3590c70 / 2d8cc60 |
+| 默认浅色 / 对钩 / 强调条、外壳禁选文本 | `app.css` + `app.js` | 396ea19 / 5b0f0bf / e3c5550 |
+| 当前打开的那条在列表里加深 | `.hist-item.on` + `markHistory` | 092accb |
 
 ---
 
 ## 交接第一棒（按 ROADMAP §11 的顺序，别跳）
 
-### ① 出题阶段要有进度（约 2 小时）
+> 原来排在前面的三件（出题阶段进度、`reasoning_note` 回前端、自审的 11 条）都已经做完，
+> 见 `9d0e49a`。现在只剩下面这条，再接 §11 的第二、三优先。
 
-讲义写完、进度停在 82%，然后**三十秒不动** —— 用户会以为卡死。
-`build_lesson` 已有 `on_step`，是 `make_quiz` 没接。
-
-```python
-# app/pipeline.py
-def make_quiz(llm, lessons, n, page_text, blocks=None, source="", on_step=None):
-    ...
-    for i, q in enumerate(pack.items, 1):
-        if on_step is not None:
-            on_step(stage="verify", index=i, total=len(pack.items))
-```
-
-`app/serve.py` 的 `_do_lesson` 里把 82% → 95% 摊开。测试：`FakeLLM` 收 `on_step` 调用序列。
-
-### ② 成本折成钱（约 2 小时）
+### ① 成本折成钱（约 2 小时）
 
 `store.py` 已经记 `prompt_tokens` / `completion_tokens`。加一张价格表（每百万 token，
 **从环境变量可覆盖**，别写死在 JS 里），在生成结果和 `/api/lessons/{id}` 里各显示
 一行「这次大约 ¥0.03」。价格缺失就只显示 token，不要猜。
 
-### ③ `reasoning_note` 要显示（约 1 小时）
+测试要有两条：**价格已知时算得对**、**没配价格时不显示钱**（而不是显示 ¥0.00）。
 
-模型不认 `reasoning_effort` 时，`LLM._create` 会静默重发并置 `reasoning_note`，
-但 `serve.py` 没把它带进 `job.result`。用户选了「高」却毫无变化 = 以为坏了。
+### ② 出处细化到行（会碰数据模型，约半天）
+
+`SourceRef.bbox` 现在是**段落块的合并矩形**：一段几百字时，同一段里多处引用指向同一个框，
+点不同出处高亮的是同一片。要精确到"那一句"，得在 `verify_refs` 里把 quote 再映射到
+行（`Block` 目前没有行信息，得先让 `_paragraphs` 留下行级 bbox）。
+
+改完必须更新 `tests/test_schema.py` 里对 `bbox` 的断言，并确认老讲义（只有块级 bbox）
+打开时不报错 —— 这是线上数据的兼容问题，不是可选优化。
+
+### ③ PPT 场景的 quote 太短（产品级，先想清楚再动手）
+
+一页五六十字，切完最长的连续片段就 9–15 字，校验能过但"出处"信息量很低。
+两条路都别急着选：放宽 quote 下限等于放松校验；允许跨行拼接要改 `verify_refs` 的语义。
+**先把「这样够不够用」想明白，再动代码。**
 
 ### 之后是 ROADMAP §11 的第二、三优先
 
-细粒度 bbox（会碰数据模型，改完更新 `tests/test_schema.py` 的 bbox 断言）→
-PPT quote 太短 → 公式 OCR。**§11 里"不建议现在做"的三条别碰。**
+公式 OCR（不可信就先别做宣称）。**§11 里"不建议现在做"的三条别碰。**
 
 ---
 
@@ -211,7 +226,7 @@ PPT quote 太短 → 公式 OCR。**§11 里"不建议现在做"的三条别碰�
 
 | 别做 | 为什么 |
 |---|---|
-| 引 Vite / React / npm 构建链 | 现在 `python -m app.serve` → 刷新即见效。前端 1200 行，原生 DOM 够用。超过 2000 行再议。 |
+| 引 Vite / React / npm 构建链 | 现在 `python -m app.serve` → 刷新即见效。前端 1700 行，原生 DOM 够用。超过 2500 行再议。 |
 | 把 `_paragraphs` / `_order` / `_toc_key` / `_running_lines` 简化掉 | 每一条都是真 PDF 上暴露过 bug 才加的，对应测试锁着。看不懂先看 ROADMAP §3。 |
 | 把 PPT 课件按页切章 | PPT 一页 50–90 字，按页切会让模型拿 246 字的考纲讲一整节 → 膨胀 26.4 倍。必须整本一章。 |
 | 用 OCR 文本校验公式 | `λ`→`入`、`ν`→`v` 是常态。`DocIR.ocr_pages` 记着哪些页是识别出来的。 |

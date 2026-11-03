@@ -87,8 +87,8 @@
 
     .\.venv\Scripts\python.exe -m pytest -q
 
-197 条通过 + 3 条跳过，全部离线（模型用假桩）。覆盖解析、章节切分、引用校验、生成管线、
-Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取消。
+214 条通过 + 3 条跳过，全部离线（模型用假桩）。行覆盖 **93%**，覆盖解析、章节切分、引用校验、
+生成管线、Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取消、客户端外壳。
 真模型的回归要手动开：`STUDY_LIVE=1` + 有 key 时 `tests/test_live.py` 才会跑真实链路（会花钱）。
 
 ## 目录
@@ -104,6 +104,7 @@ Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取�
       settings.py   设置优先级 settings.json > 环境变量，永不回明文密钥
       store.py      out/index.json 索引（原子写）
       serve.py      FastAPI（上传、解析、布局、生成、SSE 进度、历史、设置、探活）
+      desktop.py    客户端外壳：后台起服务 + pywebview 原生窗口
       cli.py        命令行入口
       web/          三栏界面（原生 DOM，无构建链）+ grade.js + vendor/katex
     tests/          214 passed + 3 skipped（共 217 条）
