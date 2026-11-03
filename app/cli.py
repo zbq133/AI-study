@@ -48,8 +48,10 @@ def main() -> int:
 
     secs = build_sections(ir)
     shown = [(i, s) for i, s in enumerate(secs, 1) if not is_reference_title(s.title)]
-    print(f"可用章节（共 {len(shown)} 条，前 20 条）：")
-    for i, s in shown[:20]:
+    print(f"可用章节（共 {len(shown)} 条）：")
+    # 全部列出来，别只印前 20 条：序号本来就允许选到 len(secs)，印 20 条会让人
+    # 以为这本书只有 20 章，后面的章节"不存在"。
+    for i, s in shown:
         print(f"  {i:>2}. {' > '.join(s.path)}  p{s.page_start}-{s.page_end}")
     skipped = len(secs) - len(shown)
     if skipped:

@@ -255,6 +255,26 @@ def _running_lines(pages):
     return {k for k, ps in seen.items() if k not in mid and len(ps) >= need}
 
 
+def content_id(path, _fh=None) -> str:
+    """这份文件的 id = 内容 sha256 前 16 位。
+
+    别用随机 uuid 当 doc_id：同一份 PDF 上传两次就成了两份文档，历史讲义里存的
+    record.doc_id 跟当前 docId 对不上，"点出处回原文"就永远提示"原 PDF 不在内存里"
+    —— 哪怕它就在内存里。按内容取 id，同内容永远同 id，历史自然接上。
+
+    _fh 是给上传用的：文件边收边算，不用再读一遍磁盘。
+    """
+    h = hashlib.sha256()
+    if _fh is not None:
+        for chunk in iter(lambda: _fh.read(1 << 20), b""):
+            h.update(chunk)
+    else:
+        with Path(path).open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    return h.hexdigest()[:16]
+
+
 def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr", should_stop=None) -> DocIR:
     """把 PDF 变成 DocIR。
 
@@ -267,7 +287,7 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr", should_stop=None)
         doc = fitz.open(str(path))
     except Exception as exc:          # 损坏 / 加密 / 根本不是 PDF
         raise BadPDF(f"{Path(path).name} 打不开：{exc}") from exc
-    doc_id = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    doc_id = content_id(path)
     if ocr_cache:
         ocr_cache = Path(ocr_cache)
 

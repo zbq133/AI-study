@@ -1,6 +1,6 @@
 import pytest
 
-from app.errors import ChapterNotFound
+from app.errors import ChapterNotFound, LLMQuota
 from app.pipeline import (_bullets, _clip, _render_sources, _solve_independently, _squeeze,
                           build_lesson)
 from app.schema import (Block, DocIR, LessonSection, Outline, OutlineItem,
@@ -222,3 +222,25 @@ def test_squeeze_keeps_english_spaces_and_drops_cjk_ones():
     assert _squeeze("机械波的传播需\n有传播振动的介质") == "机械波的传播需有传播振动的介质"
     assert _squeeze("the black\nmass generated") == "the black mass generated"
     assert _squeeze("黑粉\nblack mass") == "黑粉 black mass"
+
+
+class _QuotaLLM(FakeLLM):
+    """一被叫去独立解题就限流 —— 这不该被当成"这题不好"吞掉。"""
+
+    def json(self, system, user, model_cls, temperature=0.3, retries=2):
+        if getattr(model_cls, "__name__", "") == "VerifyResult":
+            raise LLMQuota("quota")
+        return super().json(system, user, model_cls, temperature, retries)
+
+
+def test_fatal_llm_failure_is_not_silently_dropped_as_a_bad_question():
+    """限流/key 失效不是"题不好"，吞了的话最后只出 0 道题、人还不知道为什么。"""
+    with pytest.raises(LLMQuota):
+        build_lesson(_QuotaLLM(), make_ir(), "第1章", n_quiz=1)
+
+
+def test_quiz_reports_progress_while_verifying():
+    seen = []
+    build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=1,
+                 on_step=lambda info: seen.append(info.get("stage")))
+    assert "verify" in seen, f"判题阶段没有进度回报：{seen}"

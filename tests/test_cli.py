@@ -70,3 +70,24 @@ def test_bad_quiz_count_reports_nicely(capsys, monkeypatch):
     assert rc == 2
     assert "题数要写数字" in out
     assert "Traceback" not in out
+
+
+def test_every_section_is_listed_not_just_the_first_twenty(capsys, monkeypatch):
+    """序号本来就允许选到 len(secs)，只印 20 条会让人以为这本书只有 20 章。"""
+    blocks = []
+    for i in range(1, 26):
+        title = f"第{i}章"
+        blocks.append(Block(id=f"h{i}", kind="heading", text=title, page=1, level=1,
+                            section_path=[title]))
+        blocks.append(Block(id=f"p{i}", kind="para", text=QUOTE, page=1,
+                            section_path=[title]))
+    _setup(monkeypatch)
+    monkeypatch.setattr(cli, "extract_ir",
+                        lambda path: DocIR(doc_id="d1", filename="t.pdf",
+                                           page_count=1, blocks=blocks))
+    monkeypatch.setattr(sys, "argv", ["app.cli", "t.pdf"])
+    rc = cli.main()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "第25章" in out
+    assert "前 20 条" not in out

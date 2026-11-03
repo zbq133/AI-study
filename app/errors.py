@@ -23,6 +23,17 @@ class StudyError(Exception):
             self.hint = hint
 
 
+#: 这几类不是"这一道题不好"，是"这次跑不下去"（key 失效、限流、连不上、
+#: 超预算、被叫停）。出题验证阶段逐题吞异常时，它们必须往上抛 —— 否则一次
+#: 生成最后出 0 道题，用户只看到"没有生成出内容"，压根不知道配额用完了。
+FATAL_KINDS = frozenset({"llm_auth", "llm_quota", "llm_down", "llm_timeout",
+                         "llm_busy", "budget", "cancelled", "config"})
+
+
+def is_fatal(exc: BaseException) -> bool:
+    return getattr(exc, "kind", "unknown") in FATAL_KINDS
+
+
 class EmptyDocument(StudyError):
     kind = "empty"
     title = "这份 PDF 里没有文字"

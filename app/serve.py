@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import logging.handlers
@@ -30,7 +31,7 @@ from . import __version__
 from . import settings as conf
 from .errors import MissingConfig, describe
 from .llm import LLM
-from .pdf import extract_ir, page_block_map
+from .pdf import content_id, extract_ir, page_block_map
 from .pipeline import build_lesson
 from .store import Store, make_id
 from .schema import build_sections, is_reference_title
@@ -92,9 +93,15 @@ DOCS: dict[str, dict[str, Any]] = {}
 
 
 class Job:
-    """一条后台任务的进度快照。"""
+    """一条后台任务的进度快照。
+
+    状态是工作线程在写、SSE 协程每 0.4 秒在读，所以 advance() 和 snapshot()
+    都拿同一把锁。以前只有 JOBS 字典的写入有锁，字段本身全靠 GIL 运气 ——
+    尤其 result 是个大 dict，读到一半被换掉不是不可能。
+    """
 
     def __init__(self, kind: str, label: str = ""):
+        self._lock = threading.RLock()
         self.id = uuid.uuid4().hex[:12]
         self.kind = kind                      # parse | lesson
         self.label = label
@@ -113,21 +120,39 @@ class Job:
         self.t1 = 0.0
 
     def snapshot(self) -> dict:
-        return {"id": self.id, "kind": self.kind, "label": self.label,
-                "state": self.state, "stage": self.stage, "percent": self.percent,
-                "message": self.message, "error": self.error,
-                "error_info": self.error_info,
-                "cancellable": self.state in ("queued", "running"),
-                "elapsed": round((self.t1 or time.time()) - self.t0, 1),
-                "calls": self.calls, "prompt_tokens": self.prompt_tokens,
-                "completion_tokens": self.completion_tokens,
-                "result": self.result}
+        with self._lock:
+            return {"id": self.id, "kind": self.kind, "label": self.label,
+                    "state": self.state, "stage": self.stage, "percent": self.percent,
+                    "message": self.message, "error": self.error,
+                    "error_info": self.error_info,
+                    "cancellable": self.state in ("queued", "running"),
+                    "elapsed": round((self.t1 or time.time()) - self.t0, 1),
+                    "calls": self.calls, "prompt_tokens": self.prompt_tokens,
+                    "completion_tokens": self.completion_tokens,
+                    "result": self.result}
+
+    def locked(self):
+        """给调用方一把锁：一次要连读/连写好几个字段时，用它包起来。"""
+        return self._lock
 
     def advance(self, percent: int, stage: str, message: str = "") -> None:
-        self.percent = max(self.percent, min(percent, 99))
-        self.stage = stage
-        if message:
-            self.message = message
+        with self._lock:
+            self.percent = max(self.percent, min(percent, 99))
+            self.stage = stage
+            if message:
+                self.message = message
+
+    def finish(self, state: str, error: BaseException | None = None) -> None:
+        """收尾也走同一把锁：state / error_info / t1 要么一起变，要么都不变。"""
+        with self._lock:
+            self.state = state
+            self.t1 = time.time()
+            if state == "done":
+                self.percent = 100
+                self.stage = "完成"
+            elif error is not None:
+                self.error_info = describe(error)
+                self.error = str(error) or self.error_info["title"]
 
 
 def _new_job(kind: str, label: str = "") -> Job:
@@ -145,16 +170,9 @@ def _spawn(job: Job, fn, *args) -> None:
         job.state = "running"
         try:
             await loop.run_in_executor(_executor, fn, job, *args)
-            job.state = "done"
-            job.percent = 100
+            job.finish("done")
         except Exception as exc:                    # 兜底：别让异常消失在线程里
-            job.state = "failed"
-            job.error_info = describe(exc)
-            job.error = str(exc) or job.error_info["title"]
-        finally:
-            job.t1 = time.time()
-            if job.state == "done":
-                job.stage = "完成"
+            job.finish("failed", exc)
 
     asyncio.create_task(runner())
 
@@ -162,9 +180,17 @@ def _spawn(job: Job, fn, *args) -> None:
 # ---------------------------------------------------------------- 后台干活
 
 def _parse_result(ir) -> dict:
-    """把 IR 折成前端要的那点东西：章节表 + 统计。"""
+    """把 IR 折成前端要的那点东西：章节表 + 统计。
+
+    字数先按页聚合一次，再按节的页区间求和。原来每一节都把全书块扫一遍
+    （O(章节 × 块)），换成几百页教材就是几十万次判断，而且 cached 分支每次
+    重复 parse 都重算一遍。
+    """
     secs = build_sections(ir)
     shown = [(i, s) for i, s in enumerate(secs, 1) if not is_reference_title(s.title)]
+    by_page: dict[int, int] = {}
+    for b in ir.blocks:
+        by_page[b.page] = by_page.get(b.page, 0) + len(b.text)
     return {
         "pages": ir.page_count,
         "blocks": len(ir.blocks),
@@ -172,8 +198,8 @@ def _parse_result(ir) -> dict:
         "hidden": len(secs) - len(shown),
         "sections": [{"n": i, "title": s.title, "path": s.path,
                       "page_start": s.page_start, "page_end": s.page_end,
-                      "chars": sum(len(b.text) for b in ir.blocks
-                                   if s.page_start <= b.page <= s.page_end)}
+                      "chars": sum(by_page.get(p, 0)
+                                   for p in range(s.page_start, s.page_end + 1))}
                      for i, s in shown],
     }
 
@@ -183,8 +209,9 @@ def _do_parse(job: Job, doc_id: str) -> None:
     job.advance(10, "解析 PDF", "文字层优先，没有文字的页走 OCR（一页约 10 秒）")
     ir = extract_ir(doc["path"], ocr_cache=OUT_DIR / "ocr", should_stop=job.cancel_evt.is_set)
     doc["ir"] = ir
+    doc["result"] = _parse_result(ir)      # 解析结果只算一次，cached 分支直接用
     job.advance(80, "切分章节")
-    job.result = _parse_result(ir)
+    job.result = doc["result"]
     job.advance(99, "解析完成")
 
 
@@ -244,6 +271,12 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
                         info.get("title", ""))
         elif stage == "quiz":
             job.advance(82, "出题并逐一独立验证", "每道题都要重解一遍，比较慢")
+        elif stage == "verify":
+            # 判题是最闷的一段：进度从 82% 挪到 94%，让人看见它还在动
+            total = max(1, info.get("total") or 1)
+            done = info.get("index") or 1
+            job.advance(82 + int(12 * min(done, total) / total),
+                        f"独立验证第 {done} 题", "原顺序解一次、打乱选项再解一次")
         elif stage == "done":
             job.advance(95, "整理讲义")
 
@@ -274,6 +307,10 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
     job.result = {"file": str(out), "chapter": chapter, "lesson_id": rec["id"],
                   "sections": len(lesson.sections), "quiz": len(lesson.quiz),
                   "lesson": lesson.model_dump()}
+    # 思考等级被模型拒了要说出来 —— 界面上显示成"已按默认跑"，别假装生效了
+    note = getattr(llm, "reasoning_note", "")
+    if note:
+        job.result["reasoning_note"] = note
 
 
 # ---------------------------------------------------------------- 接口
@@ -344,18 +381,39 @@ async def upload(file: UploadFile) -> dict:
     if not name.lower().endswith(".pdf"):
         raise HTTPException(400, "只接受 .pdf 文件")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    doc_id = uuid.uuid4().hex[:12]
-    dest = UPLOAD_DIR / f"{doc_id}.pdf"
+    # id 按内容取（边收边算 sha256，不用再读一遍盘）：同一份 PDF 传几次都是同一个
+    # doc_id，历史讲义里的 record.doc_id 才对得上，出处才能点回原文。
+    hasher = hashlib.sha256()
     size = 0
-    with dest.open("wb") as fh:
+    tmp: Optional[Path] = None
+    fh = None
+    try:
         while chunk := await file.read(1 << 20):
             size += len(chunk)
             if size > MAX_UPLOAD:
-                fh.close()
-                dest.unlink(missing_ok=True)
                 raise HTTPException(413, f"文件超过 {MAX_UPLOAD // 1024 // 1024}MB")
+            if size == len(chunk) and not chunk.startswith(b"%PDF-"):
+                # 只看扩展名的话，80MB 的 exe 改个名就能躺进 uploads/
+                raise HTTPException(400, "这个文件不是 PDF（开头没有 %PDF 标记）")
+            if tmp is None:
+                tmp = UPLOAD_DIR / ".incoming"
+                fh = tmp.open("wb")
             fh.write(chunk)
-    DOCS[doc_id] = {"path": dest, "filename": name, "ir": None}
+            hasher.update(chunk)
+    finally:
+        if fh is not None:
+            fh.close()
+        elif tmp is not None:
+            tmp.unlink(missing_ok=True)   # 没写成就别留空壳
+    doc_id = hasher.hexdigest()[:16]
+    dest = UPLOAD_DIR / f"{doc_id}.pdf"
+    if tmp is not None:
+        if dest.exists():
+            tmp.unlink()                  # 同一份文件已经有了，不重复占地方
+        else:
+            tmp.replace(dest)
+    if DOCS.get(doc_id) is None:
+        DOCS[doc_id] = {"path": dest, "filename": name, "ir": None}
     return {"doc_id": doc_id, "filename": name, "bytes": size}
 
 
@@ -363,9 +421,15 @@ async def upload(file: UploadFile) -> dict:
 async def parse(doc_id: str) -> dict:
     doc = DOCS.get(doc_id)
     if doc is None:
-        raise HTTPException(404, "没有这个 doc_id，先上传")
+        # 重启之后内存是空的，但 uploads/<doc_id>.pdf 还在。doc_id 是按内容算的，
+        # 所以凭 id 就能把文件找回来，历史讲义的出处不用重新上传也能点回原文。
+        path = UPLOAD_DIR / f"{doc_id}.pdf"
+        if not path.is_file():
+            raise HTTPException(404, "没有这个 doc_id，先上传")
+        doc = DOCS[doc_id] = {"path": path, "filename": path.name, "ir": None}
     if doc["ir"] is not None:
-        return {"job_id": None, "cached": True, "result": _parse_result(doc["ir"])}
+        return {"job_id": None, "cached": True,
+                "result": doc.get("result") or _parse_result(doc["ir"])}
     job = _new_job("parse", doc["filename"])
     _spawn(job, _do_parse, doc_id)
     return {"job_id": job.id, "cached": False}

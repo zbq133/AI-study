@@ -23,7 +23,7 @@
 | 项 | 状态 |
 |---|---|
 | 代码 | `app/` 12 个 Python 模块 **2164 行** + `app/web/` 四个文件 **1195 行**（另含本地 KaTeX 548 KB）+ `tests/` 11 个文件 **2160 行** |
-| 测试 | **163 passed + 3 skipped**（skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
+| 测试 | **182 passed + 3 skipped**（skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
 | HTTP 端点 | **16 个**（见 §7） |
 | 后端内核 | **约 95%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过；错误分类、取消、成本闸、历史索引都已就位 |
 | 外壳 | **约 90%**：CLI + 本地 Web 服务 + 探活 + 日志 + 一键启动脚本 |
@@ -626,7 +626,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q          # 必须 163 passed, 3 skipped
+.\.venv\Scripts\python.exe -m pytest -q          # 必须 182 passed, 3 skipped
 .\.venv\Scripts\python.exe -m app.serve          # 打开 127.0.0.1:8765 走一遍
 Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去脉
 ```
@@ -656,7 +656,7 @@ Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去�
 | P1 | ~~历史记录无索引，重启即丢~~ | `app/store.py` | 已做（`out/index.json`，P0-3） |
 | P1 | ~~`.hide` 规则缺失，答案和解析一直摆着~~ | `app/web/app.css` | 已修（2442ed5） |
 | P1 | ~~浅色主题灰字读不清~~ | `app/web/app.css` | 已修（补 7 个角色变量 + 对比度测试） |
-| P1 | **出题阶段（约 30 秒）进度条不动** | `app/pipeline.py` 的 `make_quiz` | 待做：`make_quiz` 没接 `on_step` |
+| P1 | ~~出题阶段（约 30 秒）进度条不动~~ | `app/pipeline.py` 的 `make_quiz` | 已做（`on_step(stage="verify")`，82%→94%） |
 | P1 | **OCR 阶段没有页级进度** | `app/ocr.py` | 待做：`ocr_page_cached` 可回调页码 |
 | P1 | **成本只显示调用次数，没折成钱** | `app/web/app.js` | 待做（P1-4 余下）：按模型单价表折算，价格要可配置 |
 | P1 | **出处粒度是"段落块"，不是"那一句"** | `app/schema.py` 的 `_merge_bbox` | 待做：把 bbox 细化到行（同一段里多条 ref 现在指向同一个框） |
@@ -665,7 +665,7 @@ Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去�
 | P2 | 正文里两个孤立 `$` 会被当公式 | `app/web/app.js` 的 `paintMath` | 已知，实测 26 条行内无误伤，先接受 |
 | P2 | `knowledge_point` 可能长到 48 字 | prompt | 待收窄到 30 字以内 |
 | P2 | 中文题干配英文原文（读着割裂） | prompt | 待定：按原文语种出题，或题干跟随讲义语种 |
-| P2 | 思考等级不被模型支持时是静默降级 | `app/llm.py` 的 `_create` | 已记 `reasoning_note`，但**界面还没显示它** |
+| P2 | ~~思考等级不被模型支持时是静默降级~~ | `app/llm.py` 的 `_create` | 已做（`reasoning_note` 随结果回给前端） |
 
 ---
 

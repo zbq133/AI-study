@@ -386,6 +386,104 @@ def test_parse_job_lists_sections(doc_pdf):
     assert again["cached"] is True and again["job_id"] is None
 
 
+def test_doc_id_comes_from_the_file_content(env, doc_pdf):
+    """同一份 PDF 传几次都是同一个 doc_id —— 历史讲义靠它对上 record.doc_id。"""
+    with TestClient(serve.app) as client:
+        a = _upload(client, doc_pdf).json()
+        b = _upload(client, doc_pdf, name="another-name.pdf").json()
+    assert a["doc_id"] == b["doc_id"], "同一内容不该发新 id"
+    assert a["doc_id"] == serve.content_id(doc_pdf)
+    assert len(a["doc_id"]) == 16
+
+
+def test_upload_rejects_a_pdf_named_impostor(env):
+    """改个扩展名不算 PDF：开头得有 %PDF 标记。"""
+    with TestClient(serve.app) as client:
+        r = client.post("/api/docs", files={"file": ("evil.pdf", b"MZ" + b"x" * 200,
+                                                     "application/pdf")})
+    assert r.status_code == 400
+    assert "%PDF" in r.json()["detail"]
+
+
+def test_parse_can_be_recovered_from_disk_after_a_restart(env, doc_pdf):
+    """重启之后 DOCS 是空的，但 uploads/<doc_id>.pdf 还在，parse 要能直接接回来。"""
+    with TestClient(serve.app) as client:
+        doc_id, res = _parsed(client, doc_pdf)
+        serve.DOCS.clear()                     # 模拟重启
+        assert serve.DOCS == {}
+        again = client.post(f"/api/docs/{doc_id}/parse").json()
+        assert again.get("job_id") is not None or again.get("cached"), again
+        if again.get("job_id"):
+            snap = _wait(client, again["job_id"])
+            assert snap["state"] == "done", snap["error"]
+            result = snap["result"]
+        else:
+            result = again["result"]
+    assert result["sections"] == res["sections"]
+
+
+def test_parse_recomputes_the_result_only_once(env, doc_pdf, monkeypatch):
+    """cached 分支不该每次重算一遍章节统计。"""
+    with TestClient(serve.app) as client:
+        doc_id, res = _parsed(client, doc_pdf)
+        called = []
+        monkeypatch.setattr(serve, "_parse_result", lambda ir: called.append(1) or {})
+        again = client.post(f"/api/docs/{doc_id}/parse").json()
+    assert again["cached"] is True
+    assert again["result"] == res
+    assert called == [], "cached 分支又算了一遍"
+
+
+def test_job_snapshot_and_finish_share_one_lock(env):
+    """进度读写必须同一把锁，否则 SSE 读到的是拼起来的半个状态。"""
+    job = serve.Job("parse", "x")
+    assert job._lock is not None
+    with job._lock:
+        job.advance(30, "解析中")
+        job.finish("done")
+    snap = job.snapshot()
+    assert snap["state"] == "done" and snap["percent"] == 100 and snap["stage"] == "完成"
+    assert snap["cancellable"] is False
+
+
+def test_job_snapshot_really_takes_the_lock():
+    """把锁换成会炸的假锁：真拿了锁的路径会当场炸出来，光"有锁"测不出来。
+
+    （`Lock.__enter__` 返回的是 True 不是锁本身，所以只能断言 `locked()` 的返回值，
+    不能拿 `with ... as lk` 去比对。）
+    """
+    class _Explode:
+        def __enter__(self):
+            raise AssertionError("这道没拿锁")
+
+        def __exit__(self, *a):
+            return False
+
+    job = serve.Job("parse", "x")
+    assert job.locked() is job._lock          # 调用方连读一串字段时得有锁可拿
+
+    job._lock = _Explode()
+    with pytest.raises(AssertionError):
+        job.snapshot()
+    with pytest.raises(AssertionError):
+        job.advance(50, "解析中")
+    with pytest.raises(AssertionError):
+        job.finish("done")
+
+
+def test_parse_result_counts_chars_by_page(env, doc_pdf):
+    with TestClient(serve.app) as client:
+        doc_id, res = _parsed(client, doc_pdf)
+    ir = serve.DOCS[doc_id]["ir"]
+    # 每节的字数要等于它页区间里所有块的字数（按页聚合和逐块扫必须一致）
+    secs = serve.build_sections(ir)
+    for s in res["sections"]:
+        raw = next(x for x in secs if x.title == s["title"])
+        expect = sum(len(b.text) for b in ir.blocks
+                     if raw.page_start <= b.page <= raw.page_end)
+        assert s["chars"] == expect
+
+
 def test_lesson_job_fails_without_env(doc_pdf, monkeypatch):
     for key in serve.REQUIRED:
         monkeypatch.delenv(key, raising=False)
@@ -771,3 +869,50 @@ def test_settings_need_no_restart(clean_env):
         client.post("/api/settings", json={"base_url": "https://api.example.com",
                                            "api_key": "sk-x", "model": "m1"})
         assert client.get("/api/config").json()["model"] == "m1"
+
+
+def test_chapter_pages_are_not_scraped_off_the_option_text(env):
+    """页码要从解析结果里取，别拿正则去抠 DOM 上的显示文案。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    assert "opt.textContent.match" not in js, "又在拿 DOM 当数据库用"
+    assert "sections = res.sections" in js
+    assert "function byTitle" in js
+
+
+def test_graded_questions_keep_a_way_back_to_the_explanation(env):
+    """判过之后「看答案」变成「看解析」，不能逼人重答一遍才看得见解析。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    body = js[js.index("function lockQuestion"):js.index("function revealAnswer")]
+    assert "show.classList.remove('hide')" in body
+    assert "'看解析'" in body
+
+
+def test_source_column_is_fetched_only_for_the_pages_in_view(env):
+    """原文栏按需取页，别把整本书的块文本全下载下来。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    body = js[js.index("function renderSource"):js.index("function paintSource")]
+    assert "?pages=${spec}" in body
+    assert "refPages()" in body
+
+
+def test_a_refused_reasoning_effort_is_shown_to_the_user(env, doc_pdf, monkeypatch):
+    """模型不认思考等级时要说出来，别假装它生效了。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+
+    class _PickyLLM(_FakeLLM):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.reasoning_note = "当前模型不接受「思考等级」，这次已经按默认跑过去了。"
+
+    monkeypatch.setattr(serve, "LLM", _PickyLLM)
+    with TestClient(serve.app) as client:
+        doc_id, res = _parsed(client, doc_pdf)
+        title = res["sections"][0]["title"]
+        r = client.post("/api/lessons", json={"doc_id": doc_id, "chapter": title, "n_quiz": 1})
+        snap = _wait(client, r.json()["job_id"])
+    assert snap["state"] == "done"
+    assert "思考等级" in snap["result"]["reasoning_note"]

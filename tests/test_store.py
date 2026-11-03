@@ -1,5 +1,6 @@
 """索引本身的单测：能读、能写、坏了不炸、同章覆盖。"""
 import json
+import threading
 
 from app.store import Store, make_id
 
@@ -92,3 +93,20 @@ def test_file_of_finds_the_real_file(tmp_path):
     (tmp_path / "x.json").write_text("{}", encoding="utf-8")
     s.put({"id": "a", "chapter": "第一章", "file": "x.json"})
     assert s.file_of("a") == tmp_path / "x.json"
+
+
+def test_concurrent_puts_do_not_lose_records(tmp_path):
+    """read-modify-write 必须整段加锁：不然两个并发的 put 会互相冲掉。"""
+    s = Store(tmp_path)
+    start = threading.Barrier(8)
+
+    def worker(i):
+        start.wait()
+        s.put({"id": f"r{i}", "chapter": f"第{i}章", "file": f"{i}.json"})
+
+    ts = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert {r["id"] for r in s.list(limit=100)} == {f"r{i}" for i in range(8)}

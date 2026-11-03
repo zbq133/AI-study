@@ -5,6 +5,7 @@ const esc = s => String(s == null ? '' : s)
 let docId = null;
 let layout = null;      // {pages:[{page, blocks:[{id,kind,text,level}]}]}
 let section = null;     // 当前选中的章节（来自解析结果）
+let sections = [];      // 解析结果原样存着 —— 页码从这里取，别去抠 DOM 上的文案
 let lesson = null;      // 生成出来的讲义
 
 /* ---------------- 极简 Markdown：段落 / 标题 / 列表 / 粗体 / 行内代码 ------------- */
@@ -165,18 +166,19 @@ async function afterParse(res) {
 }
 
 async function loadLayout() {
-  const r = await fetch(`/api/docs/${docId}/layout`);
-  layout = r.ok ? await r.json() : null;
+  _srcSpec = null;               // 换了一份 PDF，上一次的页清单作废
+  await renderSource();
 }
 
 /* ---------------- 章节列表 ---------------- */
 
 function renderSections(res) {
+  sections = res.sections || [];      // 页码等元数据留在这里，别从 option 文案里正则抠
   const sel = $('#sec');
   sel.innerHTML = '';
   const toc = $('#tocBody');
   toc.innerHTML = '';
-  for (const s of res.sections) {
+  for (const s of sections) {
     const o = document.createElement('option');
     o.value = s.title;
     o.textContent = `${String(s.n).padStart(2, ' ')}. ${s.path.join(' > ')} · p${s.page_start}-${s.page_end} · ${s.chars} 字`;
@@ -189,10 +191,14 @@ function renderSections(res) {
     toc.appendChild(b);
   }
   sel.classList.remove('hide');
-  section = res.sections[0] || null;
+  section = sections[0] || null;
   if (res.hidden) $('#goMeta').textContent = `另有 ${res.hidden} 条参考文献段已隐藏`;
   markToc();
   renderSource();
+}
+
+function byTitle(title) {
+  return sections.find(s => s.title === title) || { title };
 }
 
 function markToc() {
@@ -204,22 +210,13 @@ $('#tocBody').addEventListener('click', e => {
   const b = e.target.closest('.toc-item');
   if (!b) return;
   $('#sec').value = b.dataset.title;
-  section = { title: b.dataset.title };
-  // 从当前解析结果里补回页范围
-  const opt = [...$('#sec').options].find(o => o.value === b.dataset.title);
-  if (opt) {
-    const m = opt.textContent.match(/p(\d+)-(\d+)/);
-    if (m) section = { title: b.dataset.title, page_start: +m[1], page_end: +m[2] };
-  }
+  section = byTitle(b.dataset.title);
   markToc();
   renderSource();
 });
 
 $('#sec').addEventListener('change', () => {
-  const title = $('#sec').value;
-  const opt = [...$('#sec').options].find(o => o.value === title);
-  const m = opt && opt.textContent.match(/p(\d+)-(\d+)/);
-  section = m ? { title, page_start: +m[1], page_end: +m[2] } : { title };
+  section = byTitle($('#sec').value);
   markToc();
   renderSource();
 });
@@ -250,6 +247,7 @@ $('#go').onclick = async () => {
       if (s.state === 'failed') { fail(s.error_info, s.error); return; }
       lesson = s.result.lesson || {};
       $('#goMeta').textContent = `${s.result.sections || 0} 节 · ${s.result.quiz || 0} 题 · ${s.elapsed}s`;
+      if (s.result.reasoning_note) $('#err').textContent = s.result.reasoning_note;
       renderLesson(lesson);
       renderSource();
       loadHistory();            // 新的排到历史最前面
@@ -282,7 +280,7 @@ async function loadHistory() {
   }
 }
 
-/** 打开一份旧讲义。原文栏要能显示才有意义 —— 那份 PDF 得还在内存里。 */
+/** 打开一份旧讲义。doc_id 是按文件内容算的，所以同一份 PDF 重传一次就接得上。 */
 async function openLesson(id) {
   const r = await fetch(`/api/lessons/${id}`);
   if (!r.ok) {
@@ -293,14 +291,44 @@ async function openLesson(id) {
   lesson = L;
   renderLesson(L);
   $('#err').textContent = '';
-  if (record.doc_id && record.doc_id === docId) {
-    renderSource();            // 同一份 PDF 还开着，原文照旧能点
-  } else {
+  if (record.doc_id && record.doc_id === docId && layout) {
+    await renderSource();      // 同一份 PDF 还开着，原文照旧能点
+  } else if (record.doc_id && docId !== record.doc_id) {
+    // 服务重启过，或者换了份 PDF：磁盘上有 uploads/<doc_id>.pdf 就能直接重解析
+    try {
+      const p = await fetch(`/api/docs/${record.doc_id}/parse`, { method: 'POST' });
+      const pj = await p.json();
+      if (pj.job_id) {
+        const snap = await waitJob(pj.job_id);
+        if (snap.state !== 'done') throw new Error('parse failed');
+        await afterParse(snap.result);
+      } else {
+        await afterParse(pj.result);
+      }
+      docId = record.doc_id;
+      $('#upMeta').textContent = record.filename || '';
+      await renderSource();
+      return;
+    } catch (e) { /* 文件不在了，走下面的提示 */ }
     $('#sourceBody').innerHTML =
-      '<p class="hint">这是之前生成的讲义，原 PDF 已经不在内存里了。' +
-      '重新上传同一份 PDF 解析一次，就能点出处回原文。</p>';
+      '<p class="hint">这是之前生成的讲义，原 PDF 已经不在磁盘上了。' +
+      '重新上传同一份 PDF，就能点出处回原文。</p>';
     $('#srcMeta').textContent = '';
+  } else {
+    await renderSource();
   }
+}
+
+/** 轮询一条任务直到结束（打开旧讲义时自动重解析用）。 */
+function waitJob(jobId) {
+  return new Promise(resolve => {
+    const t = setInterval(async () => {
+      const r = await fetch(`/api/jobs/${jobId}`);
+      if (!r.ok) { clearInterval(t); resolve({ state: 'failed' }); return; }
+      const s = await r.json();
+      if (s.state === 'done' || s.state === 'failed') { clearInterval(t); resolve(s); }
+    }, 500);
+  });
 }
 
 $('#histBody').addEventListener('click', e => {
@@ -358,8 +386,7 @@ function renderQuiz(items) {
     out.push('<div class="qbar"><button class="qgo">提交</button>' +
              '<button class="qshow ghost">看答案</button>' +
              '<button class="qreset ghost hide">再做一次</button>' +
-             '<span class="qres"></span></div>');
-    out.push('<div class="qans hide"><div class="cans"></div>' +
+             '<span class="qres"></span></div>');    out.push('<div class="qans hide"><div class="cans"></div>' +
              (it.explanation ? `<div class="expl">${esc(it.explanation)}</div>` : '') +
              chips(it.source_ref ? [it.source_ref] : []) + '</div>');
     out.push('</div>');
@@ -383,7 +410,11 @@ function lockQuestion(q, on) {
   const fill = q.querySelector('.fillin');
   if (fill) fill.disabled = on;
   q.querySelector('.qgo').classList.toggle('hide', on);
-  q.querySelector('.qshow').classList.toggle('hide', on);
+  // 「看答案」一直留着：判过之后它变成"看解析"，否则学生想回头再看一眼
+  // 只能点「再做一次」重答一遍。答题前点它本来就等于认输，没有额外风险。
+  const show = q.querySelector('.qshow');
+  show.classList.remove('hide');
+  show.textContent = on ? '看解析' : '看答案';
   q.querySelector('.qreset').classList.toggle('hide', !on);
 }
 
@@ -469,6 +500,25 @@ function refPages() {
 }
 
 function renderSource() {
+  const spec = [...refPages()].sort((a, b) => a - b).join(',');
+  if (spec === _srcSpec) { paintSource(); return Promise.resolve(); }   // 同一批页直接用
+  _srcSpec = spec;
+  _srcSeq += 1;
+  const seq = _srcSeq;
+  return fetch(`/api/docs/${docId}/layout` + (spec ? `?pages=${spec}` : ''))
+    .then(r => (r.ok ? r.json() : null))
+    .then(data => {
+      if (seq !== _srcSeq) return;     // 中途又换了章节，旧的那次丢掉
+      layout = data;
+      paintSource();
+    })
+    .catch(() => { /* 原文栏拿不到也不至于让讲义看不了 */ });
+}
+
+let _srcSpec = null;
+let _srcSeq = 0;
+
+function paintSource() {
   if (!layout || !layout.pages) return;
   const want = refPages();
   const shown = layout.pages.filter(p => want.has(p.page));

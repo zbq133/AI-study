@@ -38,15 +38,35 @@ def path() -> Path:
 
 
 def load() -> dict[str, str]:
-    """读配置。文件不在、坏了、不是对象，一律当空 —— 配置坏不该让服务起不来。"""
+    """读配置。文件不在、坏了、不是对象，一律当空 —— 配置坏不该让服务起不来。
+
+    带 mtime 缓存：设置弹层一次要调 effective() + source_of()×4，每次都读盘就是
+    五次 IO。这里按 (mtime_ns, size) 判断变没变，没变就直接回上一份。
+    """
+    global _CACHE, _CACHE_KEY
     p = path()
+    try:
+        st = p.stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = (str(p), -1, -1)
+    if key == _CACHE_KEY:
+        return dict(_CACHE)
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        _CACHE, _CACHE_KEY = {}, key
         return {}
     if not isinstance(raw, dict):
+        _CACHE, _CACHE_KEY = {}, key
         return {}
-    return {k: str(raw.get(k) or "") for k in FIELDS if raw.get(k)}
+    _CACHE = {k: str(raw.get(k) or "") for k in FIELDS if raw.get(k)}
+    _CACHE_KEY = key
+    return dict(_CACHE)
+
+
+_CACHE: dict[str, str] = {}
+_CACHE_KEY: tuple = ("", -2, -2)
 
 
 def save(data: dict[str, Any]) -> dict[str, str]:
@@ -65,6 +85,10 @@ def save(data: dict[str, Any]) -> dict[str, str]:
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, p)
+    # 写完自己把缓存作废：mtime 分辨率在有些文件系统上是秒级，靠它判断会漏掉
+    # 同一秒内的第二次保存。
+    global _CACHE_KEY
+    _CACHE_KEY = ("", -2, -2)
     return current
 
 

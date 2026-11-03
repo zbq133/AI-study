@@ -308,3 +308,35 @@ CSS 的"类名没有人定义"和"故意不写样式"在浏览器里长得一模
 **版本号从哪来**：不写死在 HTML 里。`verNow` 打开设置时才去问 `/api/health`，拿到什么显示什么 —— 所以换后端版本不用改前端。"更新"按钮做的是同一件事 + 比对：版本变了就 `location.reload()`，没变就明说"已经是最新"，不假装在下载东西。
 
 **教训（实测撞到的）**：改完 `__version__` 后页面还显示 `v0.5.0` —— 因为服务进程里跑的还是旧模块。**Python 改动要重启服务，只有 `app/web/` 下的静态文件才靠 F5**。这也正好证明版本号是活的，不是写死的。
+
+## 2026-11-03 补记：把自审出来的 11 条一次清完
+
+一份通读报告列了 11 条，按严重程度分了三档。逐条记为什么：
+
+**🔴1 `doc_id` 改成文件内容的 sha256（`app/pdf.py` 的 `content_id`）**。原来是 `uuid4()[:12]`，同一份 PDF 上传两次就是两个 id，而 `store.make_id(doc_id, chapter)` 拿它当索引键 —— 结果：重启后打开历史讲义，「原文 pN」永远点不回去（记录里的 `doc_id` 和当前内存里的对不上），新加的"自动重新解析接回"也白搭，因为它按 doc_id 去磁盘找文件。改成内容哈希之后，同一份文件无论传几次都是同一个 id，历史记录天然能接回原文。上传时边收边算（`content_id(path, _fh)`），不额外读一遍盘。
+
+**🔴2 判过的题保留「看解析」**。原来 `lockQuestion` 把 `.qgo` 和 `.qshow` 一起 toggle，判完两个都藏了 —— 想回看解析只能点「再做一次」重答一遍，等于把"我没看懂"的人罚了一遍。现在 `.qshow` 永远可见，文案按状态切「看解析」/「看答案」。
+
+**🔴3 页码不再从 DOM 文案里正则抠**。原来 `opt.textContent.match(/p(\d+)-(\d+)/)` 把 option 的显示文字当数据库用 —— 改个文案格式就静默 `undefined`，章节直接切错。现在 `renderSections` 把 `res.sections` 存进模块变量 `sections`，用 `byTitle(title)` 查。**文案是给人看的，数据要单独存一份。**
+
+**🟡4 `Job` 加锁**。`state/percent/result` 原来裸读写，`_jobs_lock` 只保护字典的插入 —— SSE 每秒读三次，可能读到"state 已是 done 但 percent 还是 40"这种拼起来的状态。现在 `snapshot` / `advance` / `finish` 共用一把 `RLock`，`finish` 让 state、error_info、t1 一起变。另开 `locked()` 给调用方连读一串字段时用（`_do_lesson` 里要连着改 calls/tokens/result）。
+
+**🟡5 致命错误上抛**。`_solve_once` 原来 `except Exception: return ""`，把限流、超时、key 失效全吞成"这题模型没答对" —— 用户看到的是"0 道题"，以为是材料不行，实际是额度用完了。现在 `errors.is_fatal(exc)` 挑出 `llm_auth / llm_quota / llm_down / llm_timeout / llm_busy / budget / cancelled / config` 七类直接 `raise`，剩下的才当"这题不好"。**静默降级是最贵的 bug：它把系统故障伪装成内容问题。**
+
+**🟡6 `Store` 加锁**。`put` 是 read-modify-write：生成完写一条，同时用户点删除，两边各读旧表各写回，丢一条。整段 `with _LOCK:`。测试用 8 个线程 + `Barrier` 同时写，断言 8 条都在。
+
+**🟡7 上传验 `%PDF-` 魔数 + 原子落盘**。只看扩展名，把 `.exe` 改名成 `.pdf` 也能进；现在首块必须是 `%PDF-`。落盘先写 `uploads/.incoming` 再 `os.replace`，中途断了不会留半个文件被当成"已上传"。
+
+**🟡8 CLI 章节全列**。`shown[:20]` 但序号允许选到 `len(secs)` —— 印 20 条、能选 30 条，等于藏起来 10 章让人猜。现在全列。
+
+**🟢9 `_parse_result` 按页聚合**。原来每节都 `for b in ir.blocks` 全表扫一遍，23 章 × 680 块 = 一万五千次；cached 分支每次重算一遍。现在先按页聚合一次，再按区间求和；解析结果存进 `doc["result"]`，cached 分支直接复用。
+
+**🟢10 原文栏按需取页**。`loadLayout()` 原来不带 `pages` 参数，把整本书 680 块全下载下来，只为了显示本章那 2 页。现在按 `refPages()`（本章页区间 ∪ 出处页）现取，带 `_srcSpec` 去重和 `_srcSeq` 序号 —— 后者是因为连点两个出处时，慢的那个响应可能后到，不按序号丢弃就会把旧结果盖上去。
+
+**🟢11 设置读盘缓存**。`public()` 一次要调 5 次 `load()`（`effective` 一次 + `source_of`×4），每次解析一遍 JSON。现在按 `(路径, mtime_ns, size)` 缓存；`save()` 之后把 key 置成 `("", -2, -2)` 强制下次重读 —— 不能只靠 mtime，同秒内连续保存两次文件系统的分辨率分不出来。
+
+**变异验证里踩到的两个坑**（都跟断言太松有关）：
+1. `Job` 那两条第一轮**没被杀掉**：测试只断言了 `job._lock is not None`，把 `with self._lock` 换成 `if True` 照样绿。改成把锁换成一个 `__enter__` 直接抛的假锁，真拿锁的路径会当场炸。
+2. 修这条测试时又踩了一个：`threading.Lock.__enter__` 返回的是 `True` 不是锁本身，所以 `with job.locked() as lk: assert lk is job._lock` 必红。改成直接比对 `job.locked() is job._lock`。
+
+**教训**：变异测试的价值全在"这条断言能不能分辨真假"。凡是断言里出现"存在""不为 None""包含某个字符串"，都该再问一句：把它改坏了，这句还成立吗？

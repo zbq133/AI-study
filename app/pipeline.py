@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .errors import ChapterNotFound
+from .errors import ChapterNotFound, StudyError, is_fatal
 from .pdf import page_block_map, page_text_map
 from .prompts import (OUTLINE_SYS, OUTLINE_USER, QUIZ_SYS, QUIZ_USER,
                       SECTION_SYS, SECTION_USER, VERIFY_SYS, VERIFY_USER)
@@ -92,6 +92,12 @@ def _solve_once(llm, stem, options):
     try:
         r = llm.json(VERIFY_SYS, VERIFY_USER.format(stem=stem, options=opts),
                      VerifyResult, temperature=0.0)
+    except StudyError as exc:
+        # 答得牛头不对马嘴 = 这题不好，丢掉就行；但 key 失效 / 限流 / 超预算是
+        # "这次跑不下去"，再往下逐题吞掉只会安静地交出 0 道题，人还以为是材料不行。
+        if is_fatal(exc):
+            raise
+        return ""
     except Exception:
         return ""
     return extract_answer(r.answer, len(options))
@@ -102,6 +108,10 @@ def _solve_text(llm, stem):
     try:
         r = llm.json(VERIFY_SYS, VERIFY_USER.format(stem=stem, options=""),
                      VerifyResult, temperature=0.0)
+    except StudyError as exc:
+        if is_fatal(exc):
+            raise
+        return ""
     except Exception:
         return ""
     return (r.answer or "").strip()
@@ -134,7 +144,16 @@ def _solve_independently(llm, q) -> bool:
     return mapped == target
 
 
-def make_quiz(llm, lessons, n, page_text, blocks=None, source=""):
+def make_quiz(llm, lessons, n, page_text, blocks=None, source="", on_step=None):
+    """on_step 每判完一道题调一次：{"stage": "verify", "index": i, "total": n}。
+
+    出题阶段每道题要重解两遍（原顺序 + 打乱），是整条流水线里最闷的一段，
+    进度条停在那里十几秒不动，人会以为卡死了。
+    """
+    def step(**info):
+        if on_step is not None:
+            on_step(info)
+
     body = "\n\n".join(
         f"### {l.title}\n{l.explanation_md}\n易错点：{'；'.join(l.pitfalls)}"
         for l in lessons)[:MAX_CHARS]
@@ -142,6 +161,7 @@ def make_quiz(llm, lessons, n, page_text, blocks=None, source=""):
     kept = []
     seen = set()
     asked = n
+    judged = 0
     for _ in range(2):
         if asked <= 0:
             break
@@ -173,6 +193,8 @@ def make_quiz(llm, lessons, n, page_text, blocks=None, source=""):
             q.verified = _solve_independently(llm, q)
             if q.verified:
                 kept.append(q)
+            judged += 1
+            step(stage="verify", index=judged, total=max(1, len(pack.items)))
         if len(kept) == before:
             break
         asked = n - len(kept)
@@ -244,7 +266,7 @@ def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None):
         lessons.append(write_section(llm, chapter, item, sections, ptext, blocks))
     step(stage="quiz")
     quiz = make_quiz(llm, lessons, n_quiz, ptext, blocks,
-                     source=_render_sources(ir, sections))
+                     source=_render_sources(ir, sections), on_step=on_step)
     step(stage="done")
 
     return Lesson(

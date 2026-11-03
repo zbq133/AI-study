@@ -9,11 +9,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
 #: 索引文件名。放在 out/ 里，跟着产物一起走。
 INDEX_NAME = "index.json"
+
+#: read-modify-write 是一把整锁，不是只锁写盘那一下：两个并发的 put() 会各自
+#: _read() 再各自 _write()，后写的把先写的那条冲掉。os.replace 只保证文件不写
+#: 半截，管不了这个。生成有 _generate_lock 串行，但 DELETE 走的是另一条路。
+_LOCK = threading.RLock()
 
 
 def make_id(doc_id: str, chapter: str) -> str:
@@ -51,32 +57,36 @@ class Store:
     # ---------------------------------------------------------------- 写
     def put(self, rec: dict) -> dict:
         """插入或覆盖一条。返回存进去的那条（补了 created / updated）。"""
-        rows = self._read()
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        old = next((r for r in rows if r["id"] == rec["id"]), None)
-        rec = dict(rec)
-        rec["created"] = (old or {}).get("created") or now
-        rec["updated"] = now
-        rows = [r for r in rows if r["id"] != rec["id"]]
-        rows.append(rec)
-        rows.sort(key=lambda r: r.get("updated", ""), reverse=True)
-        self._write(rows)
-        return rec
+        with _LOCK:
+            rows = self._read()
+            now = time.strftime("%Y-%m-%dT%H:%M:%S")
+            old = next((r for r in rows if r["id"] == rec["id"]), None)
+            rec = dict(rec)
+            rec["created"] = (old or {}).get("created") or now
+            rec["updated"] = now
+            rows = [r for r in rows if r["id"] != rec["id"]]
+            rows.append(rec)
+            rows.sort(key=lambda r: r.get("updated", ""), reverse=True)
+            self._write(rows)
+            return rec
 
     def delete(self, rid: str) -> bool:
-        rows = self._read()
-        keep = [r for r in rows if r["id"] != rid]
-        if len(keep) == len(rows):
-            return False
-        self._write(keep)
-        return True
+        with _LOCK:
+            rows = self._read()
+            keep = [r for r in rows if r["id"] != rid]
+            if len(keep) == len(rows):
+                return False
+            self._write(keep)
+            return True
 
     def get(self, rid: str) -> dict | None:
-        return next((r for r in self._read() if r["id"] == rid), None)
+        with _LOCK:
+            return next((r for r in self._read() if r["id"] == rid), None)
 
     # ---------------------------------------------------------------- 列表
     def list(self, query: str = "", limit: int = 50) -> list[dict]:
-        rows = self._read()
+        with _LOCK:
+            rows = self._read()
         q = (query or "").strip().lower()
         if q:
             rows = [r for r in rows
