@@ -64,11 +64,28 @@ button.ghost { background: transparent; border-color: var(--line3); color: var(-
 /* 历史：一条一行，章节名太长就省略，别把左栏撑开 */
 .hist { max-height: 34%; overflow-y: auto; padding: 4px 0; flex: 0 0 auto;
         border-bottom: 1px solid var(--top-line); }
-.hist-item { display: block; width: 100%; text-align: left; padding: 6px 14px;
+.hist-item { display: flex; align-items: center; gap: 6px; width: 100%;
+             text-align: left; padding: 6px 14px;
              border: 0; background: transparent; color: var(--dim); font-size: 12.5px;
-             cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+             cursor: pointer; overflow: hidden; white-space: nowrap; }
 .hist-item:hover { background: var(--panel2); color: var(--fg); }
-.hist-item .when { color: var(--dim3); font-size: 11px; margin-left: 6px; }
+.hist-item .hname { overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
+.hist-item .when { color: var(--dim3); font-size: 11px; margin-left: 6px; flex: 0 0 auto; }
+/* 管理模式下才出现的勾：不管理时一颗都别占位置 */
+.hist-item .pick { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 3px;
+                   border: 1px solid var(--line3); display: none; }
+.hist.managing .hist-item .pick { display: block; }
+.hist.managing .hist-item.picked { background: var(--opt-on-bg); color: var(--fg); }
+.hist.managing .hist-item.picked .pick { background: var(--accent); border-color: var(--accent); }
+.histbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+           border-bottom: 1px solid var(--top-line); flex: 0 0 auto; font-size: 11.5px;
+           color: var(--dim); }
+.histbar .pickall { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.histbar .spacer { flex: 1 1 auto; }
+button.tiny { padding: 2px 8px; font-size: 11px; letter-spacing: 0; text-transform: none; }
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff;
+                padding: 3px 10px; font-size: 11.5px; }
+button.danger:disabled { opacity: .4; }
 .toc-item { display: block; width: 100%; text-align: left; padding: 7px 14px;
             border: 0; background: transparent; color: var(--dim); font-size: 12.5px;
             line-height: 1.45; cursor: pointer; border-left: 2px solid transparent; }

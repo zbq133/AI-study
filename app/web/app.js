@@ -257,27 +257,87 @@ $('#go').onclick = async () => {
 
 /* ---------------- 历史：重启之后还认得的那些讲义 ---------------- */
 
+let histRows = [];          // 最近一次的列表快照（管理模式下要按 id 找回来）
+let histMode = false;       // 管理模式：行变成可勾选，点行是"选"而不是"打开"
+const picked = new Set();
+
+function kb(n) {
+  if (!n) return '0 KB';
+  const m = n / 1024 / 1024;
+  return m >= 1 ? m.toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+}
+
+function paintHistBar() {
+  $('#histAll').checked = histRows.length > 0 && picked.size === histRows.length;
+  $('#histDel').disabled = picked.size === 0;
+  $('#histDel').textContent = picked.size ? `删除选中 ${picked.size} 条` : '删除选中';
+  const total = histRows.reduce((s, r) => s + (r.bytes || 0) + (r.pdf_bytes || 0), 0);
+  $('#histSize').textContent = `共 ${histRows.length} 条 · ${kb(total)}`;
+}
+
 async function loadHistory() {
   let rows = [];
   try {
     const r = await fetch('/api/lessons');
     if (r.ok) rows = (await r.json()).lessons || [];
   } catch (e) { rows = []; }
+  histRows = rows;
+  for (const id of [...picked]) {          // 已经不存在的就别留着占数
+    if (!rows.some(r => r.id === id)) picked.delete(id);
+  }
   const box = $('#histBody');
+  box.classList.toggle('managing', histMode);
   box.innerHTML = '';
+  $('#histEdit').textContent = histMode ? '完成' : '管理';
+  $('#histBar').classList.toggle('hide', !histMode);
   if (!rows.length) {
     box.innerHTML = '<div class="hint sm">还没有生成过讲义。</div>';
+    if (histMode) histMode = false;
+    $('#histBar').classList.add('hide');
+    $('#histEdit').textContent = '管理';
     return;
   }
   for (const rec of rows) {
     const b = document.createElement('button');
-    b.className = 'hist-item';
+    b.className = 'hist-item' + (picked.has(rec.id) ? ' picked' : '');
     b.dataset.id = rec.id;
     b.title = `${rec.filename || ''} · ${rec.chapter} · ${rec.updated || ''}`;
-    b.innerHTML = `${esc(rec.chapter)}` +
-      `<span class="when">${rec.quiz || 0} 题</span>`;
+    b.innerHTML = '<span class="pick"></span>' +
+      `<span class="hname">${esc(rec.chapter)}</span>` +
+      `<span class="when">${rec.quiz || 0} 题 · ${kb((rec.bytes || 0) + (rec.pdf_bytes || 0))}</span>`;
     box.appendChild(b);
   }
+  paintHistBar();
+}
+
+function togglePick(id) {
+  if (picked.has(id)) picked.delete(id); else picked.add(id);
+  const b = $(`#histBody .hist-item[data-id="${id}"]`);
+  if (b) b.classList.toggle('picked', picked.has(id));
+  paintHistBar();
+}
+
+async function purgePicked() {
+  const ids = [...picked];
+  if (!ids.length) return;
+  const total = histRows.filter(r => picked.has(r.id))
+    .reduce((s, r) => s + (r.bytes || 0) + (r.pdf_bytes || 0), 0);
+  const ask = `删掉这 ${ids.length} 条讲义？\n\n` +
+    `会一起删掉 out/ 里对应的 JSON；原 PDF 如果没被别的讲义用着，也一起删。\n` +
+    `能腾出大约 ${kb(total)}。删了就找不回来。`;
+  if (!confirm(ask)) return;
+  const r = await fetch('/api/lessons/purge', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids, drop_pdfs: true }),
+  });
+  if (!r.ok) { fail(null, (await r.json()).detail || '删除失败'); return; }
+  const out = await r.json();
+  picked.clear();
+  await loadHistory();
+  $('#err').textContent = '';
+  $('#detail').textContent = `删了 ${out.deleted} 条，腾出 ${kb(out.freed)}` +
+    (out.pdfs ? `（含 ${out.pdfs} 份 PDF）` : '');
 }
 
 /** 打开一份旧讲义。doc_id 是按文件内容算的，所以同一份 PDF 重传一次就接得上。 */
@@ -333,8 +393,24 @@ function waitJob(jobId) {
 
 $('#histBody').addEventListener('click', e => {
   const b = e.target.closest('.hist-item');
-  if (b) openLesson(b.dataset.id);
+  if (!b) return;
+  if (histMode) { togglePick(b.dataset.id); return; }
+  openLesson(b.dataset.id);
 });
+
+$('#histEdit').onclick = () => {
+  histMode = !histMode;
+  if (!histMode) picked.clear();
+  loadHistory();
+};
+
+$('#histAll').onchange = e => {
+  if (e.target.checked) histRows.forEach(r => picked.add(r.id));
+  else picked.clear();
+  loadHistory();
+};
+
+$('#histDel').onclick = purgePicked;
 
 /* ---------------- 讲义 ---------------- */
 

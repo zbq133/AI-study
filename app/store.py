@@ -79,6 +79,23 @@ class Store:
             self._write(keep)
             return True
 
+    def delete_many(self, ids) -> list[dict]:
+        """一次删一批，返回真被删掉的那些记录（调用方靠它去删文件）。
+
+        整批只读一次、写一次 —— 逐条 delete 会在中间把表写好几遍，
+        而且要删 50 条就得加 50 次锁。
+        """
+        wanted = {str(i) for i in ids}
+        if not wanted:
+            return []
+        with _LOCK:
+            rows = self._read()
+            gone = [r for r in rows if r["id"] in wanted]
+            if not gone:
+                return []
+            self._write([r for r in rows if r["id"] not in wanted])
+            return gone
+
     def get(self, rid: str) -> dict | None:
         with _LOCK:
             return next((r for r in self._read() if r["id"] == rid), None)

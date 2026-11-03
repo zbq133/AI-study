@@ -49,8 +49,17 @@
 
 <main class="cols">
   <aside class="col" id="toc">
-    <div class="colhead">最近生成</div>
+    <div class="colhead">最近生成
+      <span class="spacer"></span>
+      <button class="ghost tiny" id="histEdit" title="挑几条删掉，腾出空间">管理</button>
+    </div>
     <div id="histBody" class="hist"></div>
+    <div class="histbar hide" id="histBar">
+      <label class="pickall"><input type="checkbox" id="histAll"> 全选</label>
+      <span class="spacer"></span>
+      <span class="hint sm" id="histSize"></span>
+      <button class="danger" id="histDel" disabled>删除选中</button>
+    </div>
     <div class="colhead">目录</div>
     <div id="tocBody" class="pad"></div>
   </aside>

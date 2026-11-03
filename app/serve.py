@@ -485,8 +485,64 @@ def _store() -> Store:
 
 @app.get("/api/lessons")
 async def list_lessons(q: str = "", limit: int = 50) -> dict:
-    """生成过的讲义。重启之后还在，因为落在 out/index.json 里。"""
-    return {"lessons": _store().list(q, limit=max(1, min(limit, 200)))}
+    """生成过的讲义。重启之后还在，因为落在 out/index.json 里。
+
+    每条带上自己占多大：讲义 JSON + 对应的那份 PDF。清历史时人才知道能省多少。
+    """
+    rows = _store().list(q, limit=max(1, min(limit, 200)))
+    for r in rows:
+        p = _store().file_of(r["id"])
+        r["bytes"] = _size_of(p)
+        r["pdf_bytes"] = _size_of(UPLOAD_DIR / f"{Path(str(r.get('doc_id') or '')).name}.pdf")
+    return {"lessons": rows, "total_bytes": sum(r["bytes"] + r["pdf_bytes"] for r in rows)}
+
+
+def _size_of(p: Path | None) -> int:
+    if p is None:
+        return 0
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
+class PurgeBody(BaseModel):
+    ids: list[str] = []
+    drop_pdfs: bool = True      # 空间主要在上传的 PDF 上，默认一起删
+
+
+@app.post("/api/lessons/purge")
+async def purge_lessons(body: PurgeBody) -> dict:
+    """批量删讲义（连 out/ 里的 JSON 一起），可选把没人再用的上传 PDF 也删掉。
+
+    PDF 按 doc_id 引用计数删：同一份 PDF 生成过好几章时，只有最后一章被删掉才动它；
+    还在内存里（DOCS）的那份也不动，免得正看着的原文突然没了。
+    """
+    st = _store()
+    gone = st.delete_many(body.ids)
+    freed = 0
+    for rec in gone:
+        p = st.out_dir / Path(str(rec.get("file") or "")).name
+        if rec.get("file"):
+            freed += _size_of(p)
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    pdfs = 0
+    if body.drop_pdfs:
+        alive = {r.get("doc_id") for r in st.list(limit=10_000)}
+        for doc_id in {r.get("doc_id") for r in gone}:
+            if not doc_id or doc_id in alive or doc_id in DOCS:
+                continue
+            f = UPLOAD_DIR / f"{Path(str(doc_id)).name}.pdf"
+            freed += _size_of(f)
+            try:
+                f.unlink()
+                pdfs += 1
+            except OSError:
+                pass
+    return {"ok": True, "deleted": len(gone), "pdfs": pdfs, "freed": freed}
 
 
 @app.get("/api/lessons/{lesson_id}")

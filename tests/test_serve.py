@@ -76,6 +76,22 @@ def doc_pdf(env):
     return path
 
 
+@pytest.fixture()
+def book_pdf(env):
+    """两章的小书：同一个 doc_id 下能攒出两条历史，才测得出"删一条会不会把 PDF 带走"。"""
+    path = env / "book.pdf"
+    doc = fitz.open()
+    for title in ("Chapter 1 Introduction", "Chapter 2 Methods"):
+        page = doc.new_page()
+        page.insert_text((72, 90), title, fontsize=20)
+        for i in range(6):
+            page.insert_text((72, 130 + i * 18),
+                             "body line number %d of this chapter" % i, fontsize=10)
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
 def _wait(client, job_id, timeout=60.0):
     end = time.time() + timeout
     while time.time() < end:
@@ -730,6 +746,92 @@ def test_delete_lesson_removes_the_file_too(doc_pdf, monkeypatch):
         assert client.get("/api/lessons").json()["lessons"] == []
         assert client.get(f"/api/lessons/{lid}").status_code == 404
     assert not path.exists()
+
+# ---------------------------------------------------------------- 管理历史
+
+def _two_lessons(client, pdf):
+    """同一份 PDF 生成两章，返回 (两条 lesson_id, 那份 PDF 的 doc_id)。"""
+    doc_id, res = _parsed(client, pdf)
+    ids = []
+    for sec in res["sections"][:2]:
+        jid = client.post("/api/lessons",
+                          json={"doc_id": doc_id, "chapter": sec["title"], "n_quiz": 1}).json()["job_id"]
+        snap = _wait(client, jid)
+        assert snap["state"] == "done", snap["error"]
+        ids.append(snap["result"]["lesson_id"])
+    return ids, doc_id
+
+
+def test_history_list_says_how_much_space_each_one_takes(doc_pdf, monkeypatch):
+    """光有"多少条"不够 —— 占地方的到底是讲义 JSON 还是那份 PDF，得看得出来。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        _wait(client, _lesson_job(client, doc_pdf))
+        data = client.get("/api/lessons").json()
+    row = data["lessons"][0]
+    assert row["bytes"] > 0                      # 讲义 JSON 的大小
+    assert row["pdf_bytes"] > 0                  # 对应的 PDF 还在
+    assert data["total_bytes"] == row["bytes"] + row["pdf_bytes"]
+
+
+def test_purge_deletes_the_records_the_files_and_the_unused_pdf(book_pdf, monkeypatch):
+    """批量删：索引、out 里的 JSON、以及没人再用的上传 PDF 一起清掉。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        ids, doc_id = _two_lessons(client, book_pdf)
+        files = [Path(client.get(f"/api/lessons/{i}").json()["record"]["file"]) for i in ids]
+        pdf = serve.UPLOAD_DIR / f"{doc_id}.pdf"
+        assert pdf.exists()
+        serve.DOCS.pop(doc_id, None)             # 当作重启过：内存里没这份了
+        out = client.post("/api/lessons/purge", json={"ids": ids, "drop_pdfs": True}).json()
+        assert out["deleted"] == 2 and out["pdfs"] == 1 and out["freed"] > 0
+        assert client.get("/api/lessons").json()["lessons"] == []
+    assert not any(f.exists() for f in files)
+    assert not pdf.exists()
+
+
+def test_purge_keeps_a_pdf_that_another_lesson_still_uses(book_pdf, monkeypatch):
+    """同一份 PDF 生成过好几章：删掉其中一条不能把 PDF 带走，别的章还要它。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        ids, doc_id = _two_lessons(client, book_pdf)
+        serve.DOCS.pop(doc_id, None)
+        out = client.post("/api/lessons/purge", json={"ids": ids[:1], "drop_pdfs": True}).json()
+        assert out["deleted"] == 1 and out["pdfs"] == 0
+        assert len(client.get("/api/lessons").json()["lessons"]) == 1
+    assert (serve.UPLOAD_DIR / f"{doc_id}.pdf").exists()
+
+
+def test_purge_can_leave_the_pdfs_alone(book_pdf, monkeypatch):
+    """只想清记录、留 PDF（下次重新解析不用再传一遍）时也要能选。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        ids, doc_id = _two_lessons(client, book_pdf)
+        serve.DOCS.pop(doc_id, None)
+        out = client.post("/api/lessons/purge", json={"ids": ids, "drop_pdfs": False}).json()
+        assert out["deleted"] == 2 and out["pdfs"] == 0
+    assert (serve.UPLOAD_DIR / f"{doc_id}.pdf").exists()
+
+
+def test_purge_with_nothing_selected_changes_nothing(doc_pdf, monkeypatch):
+    """前端勾选刚被清空就点了删除，不该把整张表抹了。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        _wait(client, _lesson_job(client, doc_pdf))
+        out = client.post("/api/lessons/purge", json={"ids": []}).json()
+        assert out["deleted"] == 0 and out["freed"] == 0
+        assert len(client.get("/api/lessons").json()["lessons"]) == 1
+
 
 def test_unknown_lesson_is_404(env):
     with TestClient(serve.app) as client:

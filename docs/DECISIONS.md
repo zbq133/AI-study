@@ -340,3 +340,23 @@ CSS 的"类名没有人定义"和"故意不写样式"在浏览器里长得一模
 2. 修这条测试时又踩了一个：`threading.Lock.__enter__` 返回的是 `True` 不是锁本身，所以 `with job.locked() as lk: assert lk is job._lock` 必红。改成直接比对 `job.locked() is job._lock`。
 
 **教训**：变异测试的价值全在"这条断言能不能分辨真假"。凡是断言里出现"存在""不为 None""包含某个字符串"，都该再问一句：把它改坏了，这句还成立吗？
+
+---
+
+## 2026-11-03 补记：最近生成可以批量管、能删出空间
+
+主人的原话是"项目太多时会占用空间"。但左栏那五条同名条目真正占地方的，未必是讲义 JSON（几十 KB），而是 `uploads/` 里那份原始 PDF（十几 MB）。所以不是加一个删除按钮就完事，得让人**看得见**再**删得准**。
+
+**1. 先让人看见大小**。`GET /api/lessons` 每条补 `bytes`（讲义 JSON）、`pdf_bytes`（`uploads/<doc_id>.pdf`），响应再给 `total_bytes` 合计。前端每条显示「3 题 · 45 KB」，底部显示「共 5 条 · 12.4 MB」。没有这层，用户只能靠猜哪条是罪魁祸首。
+
+**2. 删 PDF 要按 doc_id 引用计数**。同一份 PDF 生成过好几章时，五条记录共用一个 PDF。删一条就删 PDF，剩下四章的「原文 pN」全废。所以删完记录后统计一遍：`still = {r["doc_id"] for r in 剩余记录}`，`doc_id in still or doc_id in DOCS` 就不动。**`DOCS` 也要算在内** —— 内存里那份用户可能正开着在看，删了他一点出处就报 410。
+
+**3. `drop_pdfs` 做成可选开关，默认开**。默认开是因为空间主要在那；但"只想清清列表、PDF 留着下次重新解析不用再传一遍"也是合理诉求，所以给个复选框，而不是替用户决定。
+
+**4. 勾选状态存前端内存，不落 localStorage**。`.hist.managing` 时才显示勾选框；退出管理模式或删完就清空。理由：这是"一次操作"，不是"设置"，留到下次反而会出现"我以为没选、结果删了一堆"。`loadHistory()` 每次重新拉列表时还会把已不存在的 id 从选中集合里剔掉。
+
+**5. 空的 `ids` 必须是什么都不做**。`Store.delete_many` 开头 `if not wanted: return []`。这条看着多余，但前端勾选刚被清空、用户顺手点删除的时序是真实存在的；少了这一句，一个 `wanted` 为空集合的过滤会把整张表抹掉。
+
+**6. 删之前 `confirm()` 把话说清楚**：删哪些、连不连 PDF、大概能腾出多少、找不回来。数字从当前列表算，不是"将释放空间"这种空话。
+
+**7. 顺手记一条工具教训**：为了把测试里的 `doc_pdf` 批量换成 `book_pdf`，我用了 `Get-Content -Raw | Set-Content -Encoding utf8` 做整文件往返，PowerShell 5.1 按 GBK 读 UTF-8 中文再写回，整份 `tests/test_serve.py` 变成乱码（`SyntaxError: invalid non-printable character U+E1BC`），只能 `git checkout --` 回滚重做。**中文内容一律用编辑工具改，别让 PowerShell 做文本中转。**

@@ -23,8 +23,8 @@
 | 项 | 状态 |
 |---|---|
 | 代码 | `app/` 12 个 Python 模块 **2164 行** + `app/web/` 四个文件 **1195 行**（另含本地 KaTeX 548 KB）+ `tests/` 11 个文件 **2160 行** |
-| 测试 | **182 passed + 3 skipped**（skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
-| HTTP 端点 | **16 个**（见 §7） |
+| 测试 | **184 passed + 3 skipped**（共 187 条；skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
+| HTTP 端点 | **17 个**（见 §7） |
 | 后端内核 | **约 95%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过；错误分类、取消、成本闸、历史索引都已就位 |
 | 外壳 | **约 90%**：CLI + 本地 Web 服务 + 探活 + 日志 + 一键启动脚本 |
 | 界面 | **约 85%**：三栏（目录 / 讲义 / 原文）、出处高亮联动、习题先做后判、设置界面（四个标签：模型接入 / 颜色 / 字号 / 版本）、原文可折叠 |
@@ -256,7 +256,7 @@ no-cache、越界 404、类型不随系统猜测变）；变异四条全部击�
 - **id 由 `sha1(doc_id + chapter)[:12]` 决定**：同一份 PDF 的同一章重新生成就是覆盖，不留一堆同名文件；`created` 保留首次时间，`updated` 每次刷新。
 - 写入走临时文件 + `os.replace`，中途崩了不会留下半截 JSON；索引被人手改坏了就当空的用（下次写入重排），不让它把服务拖死。
 - `file` 字段只按文件名解析（`out_dir / Path(file).name`），记录被写成 `../secret.json` 也读不到外面。
-- 端点：`GET /api/lessons?q=&limit=`、`GET /api/lessons/{id}`（记录 + 讲义本体）、`DELETE /api/lessons/{id}`（连文件一起删）。
+- 端点：`GET /api/lessons?q=&limit=`、`GET /api/lessons/{id}`（记录 + 讲义本体）、`DELETE /api/lessons/{id}`（连文件一起删）、`POST /api/lessons/purge`（批量删，可选连上传的 PDF 一起删）。列表里每条都带 `bytes` / `pdf_bytes`，`total_bytes` 是合计 —— 占地方的是讲义还是 PDF，打开就知道。
 - 记录在、文件被手删 → `410 讲义文件被删了，重新生成一次`，不是 500。
 - 左栏顶部加"最近生成"，点一条就把讲义渲染出来；**原文栏只在原 PDF 还在内存里时才有内容**（重启后 doc_id 就没了，这时列表能看、出处点不回原文）。
 
@@ -595,6 +595,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 | GET | `/api/lessons?q=&limit=` | 历史列表（读 `out/index.json`） |
 | GET | `/api/lessons/{lesson_id}` | 单份讲义（记录 + 本体；文件没了 410） |
 | DELETE | `/api/lessons/{lesson_id}` | 删记录连文件一起删 |
+| POST | `/api/lessons/purge` | 批量删（`{ids, drop_pdfs}`），顺带删没人再用的上传 PDF |
 | POST | `/api/jobs/{job_id}/cancel` | 置取消位；生成/解析的下一次心跳就会停 |
 | GET | `/api/jobs/{job_id}` | 任务快照（进度、成本、错误分类、是否可取消） |
 | GET | `/api/jobs/{job_id}/events` | SSE 进度流（0.4 秒一帧） |
@@ -626,7 +627,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q          # 必须 182 passed, 3 skipped
+.\.venv\Scripts\python.exe -m pytest -q          # 必须 184 passed, 3 skipped
 .\.venv\Scripts\python.exe -m app.serve          # 打开 127.0.0.1:8765 走一遍
 Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去脉
 ```
