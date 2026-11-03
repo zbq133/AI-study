@@ -290,6 +290,26 @@ def test_history_rows_are_separated_by_a_hairline(env):
         assert re.search(r"border-top:\s*1px\s+solid", rule.group(1)), rule.group(1)
 
 
+def test_selected_rows_show_a_check_mark_not_a_blue_block(env):
+    """勾上是"框里出现蓝色对钩"，不是把整块填成蓝的（一列蓝方块认不出是勾）。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+    picked = re.search(r"\.hist\.managing \.hist-item\.picked \.pick[^{]*\{([^}]*)\}", css)
+    assert picked and "border-color: var(--accent)" in picked.group(1), "选中没有描边"
+    assert "background: var(--accent)" not in picked.group(1), "又填成实心蓝块了"
+    # 对钩用边框画：一段 transform: rotate(45deg) 的直角
+    tick = re.search(r"\.pick::after[^{]*\{([^}]*)\}", css)
+    assert tick, "没有画对钩"
+    assert "rotate(45deg)" in tick.group(1) and "border-width: 0 2px 2px 0" in tick.group(1), tick.group(1)
+    # 全选那颗也走同一套（原来是原生 checkbox，和行里的方块长得不一样）
+    assert 'id="histAll"' in html and "<input" not in html[html.index('id="histAll"') - 80:html.index('id="histAll"') + 60]
+    assert re.search(r"function toggleAll\(\)", js), "全选的点击逻辑改名了"
+    assert re.search(r"classList\.toggle\('picked', all\)", js), "全选那颗没跟着变对钩"
+    assert "#histAll').checked" not in js, "还在用原生 checkbox 的 checked"
+
+
 def test_default_theme_is_light(env):
     """没设置过颜色时默认浅色 —— 首屏（head 内联脚本）和设置面板两处都别各说各的。"""
     with TestClient(serve.app) as client:

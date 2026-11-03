@@ -268,7 +268,10 @@ function kb(n) {
 }
 
 function paintHistBar() {
-  $('#histAll').checked = histRows.length > 0 && picked.size === histRows.length;
+  const all = histRows.length > 0 && picked.size === histRows.length;
+  const box = $('#histAll');
+  box.classList.toggle('picked', all);
+  box.setAttribute('aria-checked', all ? 'true' : 'false');
   $('#histDel').disabled = picked.size === 0;
   $('#histDel').textContent = picked.size ? `删除选中 ${picked.size} 条` : '删除选中';
   const total = histRows.reduce((s, r) => s + (r.bytes || 0) + (r.pdf_bytes || 0), 0);
@@ -404,10 +407,15 @@ $('#histEdit').onclick = () => {
   loadHistory();
 };
 
-$('#histAll').onchange = e => {
-  if (e.target.checked) histRows.forEach(r => picked.add(r.id));
-  else picked.clear();
+function toggleAll() {
+  if (histRows.length && picked.size === histRows.length) picked.clear();
+  else histRows.forEach(r => picked.add(r.id));
   loadHistory();
+}
+
+$('#histAll').onclick = toggleAll;
+$('#histAll').onkeydown = e => {
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleAll(); }
 };
 
 $('#histDel').onclick = purgePicked;
