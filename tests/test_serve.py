@@ -103,6 +103,56 @@ def test_index_serves_page(env):
         r = client.get("/")
     assert r.status_code == 200
     assert "AI Study" in r.text
+    # 界面拆成静态文件后，首页必须把 css / js 引上，否则页面是裸的
+    assert "/static/app.css" in r.text
+    assert "/static/app.js" in r.text
+
+
+def test_static_assets_are_served_with_the_right_type(env):
+    """js 的 Content-Type 猜错会被浏览器的严格 MIME 检查直接拒绝执行。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css")
+        js = client.get("/static/app.js")
+    assert css.status_code == 200
+    assert css.headers["content-type"].startswith("text/css")
+    assert "color-scheme" in css.text
+    assert js.status_code == 200
+    assert js.headers["content-type"].startswith("text/javascript")
+    assert "EventSource" in js.text
+
+
+def test_static_is_not_cached(env):
+    """本地开发是边改边刷的，缓存住一个旧 app.js 能让人怀疑人生。"""
+    with TestClient(serve.app) as client:
+        r = client.get("/static/app.css")
+    assert r.headers["cache-control"] == "no-cache"
+
+
+def test_static_type_does_not_depend_on_the_os_guess(env, monkeypatch):
+    """有的 Windows 把 .js 登记成 text/plain，浏览器会拒绝执行。
+
+    类型表是写死的，系统怎么猜都不该影响结果 —— 这条用例把猜测改成 text/plain，
+    模拟那台机器。注意 Starlette 是 `from mimetypes import guess_type`，要打在
+    它自己那个名字上，改 mimetypes.guess_type 不起作用。
+    """
+    import starlette.responses as sr
+    monkeypatch.setattr(sr, "guess_type", lambda *a, **k: ("text/plain", None))
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js")
+    assert js.headers["content-type"].startswith("text/javascript")
+
+
+def test_static_cannot_reach_outside_the_web_dir(env):
+    with TestClient(serve.app) as client:
+        sneaky = client.get("/static/..%2Fserve.py")
+        missing = client.get("/static/nope.css")
+    assert sneaky.status_code == 404, sneaky.text
+    assert missing.status_code == 404
+    # 路由层可能先按 "/" 切掉了，所以再直接捅一次函数，确认拦截真的在函数里
+    import asyncio
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        asyncio.run(serve.static_file("../serve.py"))
 
 
 def test_upload_rejects_non_pdf(env, doc_pdf):

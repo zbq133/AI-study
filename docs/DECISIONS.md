@@ -90,3 +90,16 @@ P0-1。`SourceRef` 原来只有 `page` + `quote`。前端想"点出处跳到原�
 变异验证四条（全部击杀）：`locate_quote` 恒返回 `[]`、`_merge_bbox` 只取第一块、`verify_refs` 不写 `blocks`、`_locate` 去掉 y 单调检查。测试 64 → 68。
 
 `bbox` 允许为空：OCR 出来的块、以及没有几何信息的老 JSON 都没有坐标，此时 `blocks` 照样有值，前端退化成"按 id 高亮"即可。这个降级路径是故意留的，不是漏写。
+
+## 2026-11-03 补记：界面拆成静态文件（`app/web/`）
+
+P0-2。原来整个前端是 `app/serve.py` 里一个 7743 字符的三引号字符串，改一行 CSS 要在 Python 字符串里找位置，没有语法高亮、没有缩进保护。现在拆成 `app/web/index.html`（1562 字节）、`app/web/app.css`（1910）、`app/web/app.js`（4500），`serve.py` 从 505 行降到 325 行。
+
+两处没有照草案做：
+
+1. **没用 `StaticFiles`，自己写 `GET /static/{name}`。** 想要的是"每个响应都带 `cache-control: no-cache`"——本地开发是边改边刷的，缓存住一个旧 `app.js` 会让人以为改的代码没生效。`StaticFiles` 不方便逐响应插头。越界靠 `path = (WEB_DIR / name).resolve()` + `if WEB_DIR not in path.parents: 404` 拦，比字符串前缀比较靠谱（`..`、软链、大小写都会在 `resolve()` 之后现形）。
+2. **MIME 类型写死成 `WEB_TYPES` 表，不交给 `mimetypes` 猜。** Starlette 的 `FileResponse` 在 `media_type=None` 时会 `guess_type(path)`；Windows 上 `mimetypes` 会去读注册表，某些机器把 `.js` 登记成 `text/plain`，浏览器的严格 MIME 检查直接拒绝执行——页面能出来，按钮全不响应，而且控制台只说一句 "refused to execute script"。这类故障排查成本远高于写三个常量的成本。
+
+**踩到的坑（值得记）**：第一版测试把 `mimetypes.guess_type` 打桩成 `text/plain`，以为能守住"类型不随系统变"，结果变异 `media_type=None` 照样存活 —— 因为 Starlette 是 `from mimetypes import guess_type`，早把函数对象接到了自己模块里，改 `mimetypes.guess_type` 对它无效。要打在 `starlette.responses.guess_type` 上。**打桩要打在使用方，不是定义方。**
+
+变异验证四条（全部击杀）：去掉越界检查、`media_type=None`、去掉 no-cache、首页不引 css。测试 68 → 72。

@@ -22,11 +22,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 代码 | `app/` 7 个模块约 1650 行，`tests/` 68 条测试全绿 |
+| 代码 | `app/` 7 个 Python 模块约 1650 行 + `app/web/` 三个静态文件约 8 KB，`tests/` 72 条测试全绿 |
 | 后端内核 | **约 90%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过 |
-| 外壳 | **约 60%**：CLI + 本地 Web 服务（`app/serve.py`，上传/解析/生成/SSE 进度） |
-| 界面 | **约 15%**：一个单页表单 + 进度条 + `<pre>` 结果，能用但不像产品 |
-| 最新 commit | `d9f6e0f feat: 加本地 Web 服务` |
+| 外壳 | **约 65%**：CLI + 本地 Web 服务（`app/serve.py`，上传/解析/生成/SSE 进度/静态资源） |
+| 界面 | **约 15%**：一个单页表单 + 进度条 + `<pre>` 结果，能用但不像产品（已拆成 `app/web/`，改起来不再是在 Python 字符串里摸） |
+| 最新 commit | `e1e28a7 feat: 出处记下落在哪几个块和它的矩形` |
 | 运行环境 | Python **3.12**（3.15 装不上 onnxruntime，见 §4） |
 
 **真跑实测数据**（`12. Summary and recommendations`，15 页双栏综述）：
@@ -204,17 +204,32 @@ class SourceRef(BaseModel):
 
 #### P0-2 把界面拆成静态文件（不引构建链）
 
-现在 `INDEX_HTML` 是 `serve.py` 里一个 7743 字符的三引号字符串。改一行前端要在 Python 字符串里找位置，还没语法高亮。
+~~现在 `INDEX_HTML` 是 `serve.py` 里一个 7743 字符的三引号字符串。~~ **✅ 已完成。**
 
-**怎么改**：
+落地形态（比草案改了一处）：
 
 ```
-app/web/index.html
-app/web/app.js
-app/web/app.css
+app/web/index.html   1562 字节
+app/web/app.css      1910 字节
+app/web/app.js       4500 字节
 ```
 
-`serve.py` 里挂 `app.mount("/static", StaticFiles(directory="app/web"))`，`GET /` 返回 `FileResponse("app/web/index.html")`。
+- `serve.py` 从 505 行降到 325 行，`INDEX_HTML` 整个删掉。
+- **没有用 `StaticFiles`**，改成自己写一个 `GET /static/{name}`：静态文件服务要的是
+  "每个响应都带 no-cache"，`StaticFiles` 不方便插手；而本地开发是边改边刷的，
+  缓存住一个旧 `app.js` 能让人怀疑人生。路径越界用
+  `path = (WEB_DIR / name).resolve()` + `if WEB_DIR not in path.parents: 404` 拦。
+- MIME 类型写成常量表 `WEB_TYPES`，**不交给 `mimetypes` 猜**：Starlette 的 FileResponse
+  在 `media_type=None` 时会 `guess_type(path)`，而 Windows 的 mimetypes 读注册表，
+  某些机器把 `.js` 登记成 `text/plain` → 浏览器严格 MIME 检查直接拒绝执行，表现是
+  "页面出来了但按钮全不响应"。测试里把 `starlette.responses.guess_type` 打桩成
+  `text/plain` 来锁这条。
+
+**验收（已达成）**：`tests/test_serve.py` 五条（首页引上 css/js、css/js 类型正确、
+no-cache、越界 404、类型不随系统猜测变）；变异四条全部击杀（去掉越界检查 /
+`media_type=None` / 去掉 no-cache / 首页不引 css）。真起服务冒烟：
+`GET /` 200 text/html 1562 字节、`/static/app.css` 200 text/css、`/static/app.js`
+200 text/javascript、`/static/nope.css` 404，全部 `cache-control: no-cache`。
 
 **明确不要做的事**：不引入 Vite / React / npm。
 理由：现在 `python -m app.serve` → 刷新浏览器就能看到改动，没有构建等待。引入打包器会让"改一行等 30 秒 build"成为日常，而这个项目的前端复杂度（三栏 + 高亮 + 自测）用原生 DOM + 一点点事件委托完全够。等到超过 2000 行再议。
@@ -430,6 +445,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 | # | 改动 | 所属 | 破坏性 |
 |---|---|---|---|
+| 0 | `GET /static/{name}` 发 `app/web/` 里的 css/js | ✅ P0-2 已完成 | 新增 |
 | 1 | `SourceRef` 加 `blocks: list[str]`、`bbox` | ✅ P0-1 已完成 | 否（有默认值） |
 | 2 | `_reading_order_ok` → `locate_quote` 返回位置 | ✅ P0-1 已完成 | 内部函数，不影响外部 |
 | 3 | `GET /api/docs/{id}/layout` 返回本章页的 blocks | P1-1 | 新增 |

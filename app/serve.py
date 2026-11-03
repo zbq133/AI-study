@@ -21,7 +21,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .llm import LLM
@@ -35,6 +35,15 @@ HOST = "127.0.0.1"
 PORT = 8765
 UPLOAD_DIR = Path("uploads")
 OUT_DIR = Path("out")
+#: 前端三个文件放在 app/web/ 下，跟 Python 代码平级。不引构建链 —— 改一行
+#: HTML 不该先跑一次 npm install。
+WEB_DIR = Path(__file__).resolve().parent / "web"
+#: 前端资源的类型表。**不交给系统的 MIME 猜测**：Windows 上 mimetypes 会去读
+#: 注册表，某些机器把 .js 登记成 text/plain，浏览器严格 MIME 检查直接拒绝执行，
+#: 表现是"页面出来了但按钮全不响应"。写死一张表，换机器也一样。
+WEB_TYPES = {".css": "text/css; charset=utf-8",
+             ".js": "text/javascript; charset=utf-8",
+             ".html": "text/html; charset=utf-8"}
 MAX_UPLOAD = 80 * 1024 * 1024
 REQUIRED = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
 
@@ -194,9 +203,26 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
 app = FastAPI(title="AI Study", docs_url=None, redoc_url=None, openapi_url=None)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    return INDEX_HTML
+@app.get("/")
+async def index() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html",
+                        media_type=WEB_TYPES[".html"],
+                        headers={"cache-control": "no-cache"})
+
+
+@app.get("/static/{name}")
+async def static_file(name: str) -> FileResponse:
+    """只发 app/web/ 里的文件。
+
+    不用 StaticFiles：那个不方便给每个响应加 no-cache，而本地开发时前端是边改
+    边刷的，缓存住一个旧 app.js 能让人怀疑人生。
+    """
+    path = (WEB_DIR / name).resolve()
+    if WEB_DIR not in path.parents or not path.is_file():
+        raise HTTPException(404, "没有这个文件")
+    return FileResponse(path,
+                        media_type=WEB_TYPES.get(path.suffix, "application/octet-stream"),
+                        headers={"cache-control": "no-cache"})
 
 
 @app.post("/api/docs")
@@ -293,211 +319,6 @@ def main() -> None:
     import uvicorn
     print(f"AI Study 服务：http://{HOST}:{PORT}")
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
-
-
-INDEX_HTML = """<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<title>AI Study</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 15px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-         background: #0f1419; color: #d7dde5; }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 80px; }
-  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
-  .sub { color: #7c8794; font-size: 13px; margin-bottom: 24px; }
-  .card { background: #151b23; border: 1px solid #232c38; border-radius: 10px;
-          padding: 18px; margin-bottom: 16px; }
-  .card h2 { font-size: 13px; color: #7c8794; font-weight: 600; margin: 0 0 12px;
-             letter-spacing: .04em; }
-  label { display: block; font-size: 13px; color: #9aa6b2; margin: 10px 0 6px; }
-  select, input[type=number] { width: 100%; padding: 9px 10px; border-radius: 7px;
-        border: 1px solid #2c3541; background: #0f1419; color: #d7dde5; font-size: 14px; }
-  input[type=file] { width: 100%; font-size: 13px; color: #9aa6b2; }
-  button { padding: 9px 18px; border-radius: 7px; border: 1px solid #2f6fb3;
-           background: #1b4d80; color: #e6eef7; font-size: 14px; cursor: pointer; }
-  button:disabled { opacity: .45; cursor: default; }
-  .row { display: flex; gap: 12px; align-items: flex-end; }
-  .row > * { flex: 1; }
-  .row > button { flex: 0 0 auto; }
-  .bar { height: 6px; background: #232c38; border-radius: 3px; overflow: hidden;
-         margin: 14px 0 8px; }
-  .bar > i { display: block; height: 100%; width: 0; background: #3f8fd6;
-             transition: width .35s ease; }
-  .meta { font-size: 12.5px; color: #7c8794; font-variant-numeric: tabular-nums; }
-  .err { color: #e06c75; font-size: 13.5px; white-space: pre-wrap; }
-  .ok { color: #5fb87a; }
-  pre { background: #0b1016; border: 1px solid #1e252f; border-radius: 8px;
-        padding: 12px; font-size: 12.5px; max-height: 420px; overflow: auto;
-        white-space: pre-wrap; word-break: break-word; }
-  .hide { display: none; }
-  a { color: #5aa8e6; }
-</style></head><body><div class="wrap">
-<h1>AI Study</h1>
-<div class="sub">上传课件 → 选一章 → 生成不复述原文的讲义，和答案经过独立验证的习题。</div>
-
-<div class="card">
-  <h2>1 · 课件</h2>
-  <input type="file" id="file" accept=".pdf">
-  <div class="row" style="margin-top:12px">
-    <button id="up">上传并解析</button>
-    <span class="meta" id="upMeta"></span>
-  </div>
-  <div class="bar hide" id="pBarWrap"><i id="pBar"></i></div>
-  <div class="meta" id="pStage"></div>
-  <div class="meta" id="pDetail"></div>
-  <div class="err" id="pErr"></div>
-</div>
-
-<div class="card hide" id="pickCard">
-  <h2>2 · 选章节</h2>
-  <label for="sec">章节（页码与字数来自解析结果）</label>
-  <select id="sec"></select>
-  <label for="nq">出几道题</label>
-  <input type="number" id="nq" value="3" min="1" max="10">
-  <div class="row" style="margin-top:14px">
-    <button id="go">生成讲义</button>
-    <span class="meta" id="goMeta"></span>
-  </div>
-</div>
-
-<div class="card hide" id="runCard">
-  <h2>3 · 进度</h2>
-  <div class="bar"><i id="bar"></i></div>
-  <div class="meta" id="stage">—</div>
-  <div class="meta" id="detail"></div>
-  <div class="err" id="err"></div>
-</div>
-
-<div class="card hide" id="outCard">
-  <h2>4 · 结果</h2>
-  <div class="meta" id="summary"></div>
-  <div id="preview"></div>
-</div>
-
-<script>
-const $ = s => document.querySelector(s);
-let docId = null;
-
-function stageView(bar, stageEl, detailEl, snap) {
-  bar.style.width = (snap.percent || 0) + '%';
-  stageEl.textContent = snap.stage + (snap.state === 'running' ? '…' : '');
-  detailEl.textContent = [snap.message, snap.calls ? `模型调用 ${snap.calls} 次` : '',
-                          snap.elapsed ? `${snap.elapsed}s` : '']
-                          .filter(Boolean).join(' · ');
-}
-
-function watch(jobId, onDone) {
-  const es = new EventSource(`/api/jobs/${jobId}/events`);
-  es.onmessage = ev => {
-    const snap = JSON.parse(ev.data);
-    onDone.snap(snap);
-    if (snap.state === 'done' || snap.state === 'failed') { es.close(); onDone.end(snap); }
-  };
-  es.onerror = () => { es.close(); };
-}
-
-$('#up').onclick = async () => {
-  const f = $('#file').files[0];
-  if (!f) return;
-  $('#up').disabled = true; $('#pErr').textContent = '';
-  $('#pBarWrap').classList.remove('hide');
-  const fd = new FormData(); fd.append('file', f);
-  try {
-    const r = await fetch('/api/docs', { method: 'POST', body: fd });
-    if (!r.ok) throw new Error((await r.json()).detail || r.status);
-    const up = await r.json();
-    docId = up.doc_id;
-    $('#upMeta').textContent = `${up.filename} · ${(up.bytes/1048576).toFixed(1)} MB`;
-    const p = await fetch(`/api/docs/${docId}/parse`, { method: 'POST' });
-    const pj = await p.json();
-    if (pj.cached) { renderSections(pj.result); $('#up').disabled = false; return; }
-    watch(pj.job_id, {
-      snap: s => stageView($('#pBar'), $('#pStage'), $('#pDetail'), s),
-      end: s => {
-        $('#up').disabled = false;
-        if (s.state === 'failed') { $('#pErr').textContent = s.error; return; }
-        renderSections(s.result);
-      }
-    });
-  } catch (e) {
-    $('#pErr').textContent = String(e.message || e);
-    $('#up').disabled = false;
-  }
-};
-
-function renderSections(res) {
-  const sel = $('#sec');
-  sel.innerHTML = '';
-  for (const s of res.sections) {
-    const o = document.createElement('option');
-    o.value = s.title;
-    o.textContent = `${String(s.n).padStart(2,' ')}. ${s.path.join(' > ')}  ·  p${s.page_start}-${s.page_end}  ·  ${s.chars} 字`;
-    sel.appendChild(o);
-  }
-  $('#pickCard').classList.remove('hide');
-  if (res.hidden) $('#goMeta').textContent = `另有 ${res.hidden} 条参考文献段已隐藏`;
-}
-
-$('#go').onclick = async () => {
-  if (!docId) return;
-  $('#go').disabled = true; $('#err').textContent = ''; $('#outCard').classList.add('hide');
-  $('#runCard').classList.remove('hide');
-  const body = JSON.stringify({ doc_id: docId, chapter: $('#sec').value,
-                                n_quiz: Number($('#nq').value) || 3 });
-  const r = await fetch('/api/lessons', { method: 'POST',
-      headers: { 'content-type': 'application/json' }, body });
-  if (!r.ok) {
-    $('#err').textContent = (await r.json()).detail || r.status;
-    $('#go').disabled = false; return;
-  }
-  const { job_id } = await r.json();
-  watch(job_id, {
-    snap: s => {
-      stageView($('#bar'), $('#stage'), $('#detail'), s);
-      $('#goMeta').textContent = s.elapsed ? `${s.elapsed}s` : '';
-    },
-    end: s => {
-      $('#go').disabled = false;
-      if (s.state === 'failed') { $('#err').textContent = s.error; return; }
-      showResult(s.result);
-    }
-  });
-};
-
-function showResult(res) {
-  $('#outCard').classList.remove('hide');
-  const L = res.lesson || {};
-  $('#summary').innerHTML =
-    `调用 ${res.sections ? '' : ''}<b>${L.sections ? L.sections.length : 0}</b> 节 · ` +
-    `<b>${res.quiz || 0}</b> 道题通过验证 · 写入 <code>${res.file || ''}</code>`;
-  const parts = [];
-  if (L.learning_objectives?.length) {
-    parts.push('学习目标');
-    L.learning_objectives.forEach(x => parts.push('  • ' + x));
-    parts.push('');
-  }
-  (L.sections || []).forEach((s, i) => {
-    parts.push(`【${i+1}/${L.sections.length}】${s.title}`);
-    parts.push(s.explanation_md);
-    if (s.pitfalls?.length) parts.push('易错点：' + s.pitfalls.join('；'));
-    parts.push('');
-  });
-  if (L.quiz?.length) {
-    parts.push(`习题（${L.quiz.length} 道，均已独立重解验证）`);
-    L.quiz.forEach((q, i) => {
-      parts.push(`${i+1}. ${q.stem}`);
-      (q.options || []).forEach((o, j) =>
-        parts.push(`   ${String.fromCharCode(65+j)}. ${o}`));
-      parts.push(`   答案 ${q.answer}`);
-    });
-  }
-  const pre = document.createElement('pre');
-  pre.textContent = parts.join('\\n');
-  $('#preview').innerHTML = '';
-  $('#preview').appendChild(pre);
-}
-</script></div></body></html>"""
 
 
 if __name__ == "__main__":
