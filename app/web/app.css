@@ -25,6 +25,18 @@ input, textarea, select { -webkit-user-select: text; user-select: text; }
 .brand { font-weight: 600; font-size: 15px; letter-spacing: .02em; margin-right: 6px; }
 .sep { flex: 1; }
 .top input[type=file] { font-size: 12.5px; color: var(--dim); max-width: 240px; }
+/* 原生「选择文件」按钮是系统灰，跟这套蓝白不搭；::file-selector-button 是唯一能染它的口子 */
+.top input[type=file]::file-selector-button {
+  padding: 6px 14px; margin-right: 10px; border: 1px solid var(--accent);
+  border-radius: 6px; background: var(--accent); color: #fff; font-size: 12.5px;
+  font-family: inherit; cursor: pointer; transition: background-color .16s ease, opacity .16s ease;
+}
+.top input[type=file]::file-selector-button:hover { background: var(--accent-dark); }
+.top input[type=file]::-webkit-file-upload-button {        /* 老 Chromium 走这条 */
+  padding: 6px 14px; margin-right: 10px; border: 1px solid var(--accent);
+  border-radius: 6px; background: var(--accent); color: #fff; font-size: 12.5px;
+  font-family: inherit; cursor: pointer;
+}
 .top input[type=number] { width: 60px; padding: 5px 7px; border-radius: 6px;
       border: 1px solid var(--line3); background: var(--bg); color: var(--fg); font-size: 13px; }
 .top select { max-width: 420px; padding: 5px 8px; border-radius: 6px;
@@ -163,7 +175,10 @@ button.danger:disabled { opacity: .4; }
                         color .16s ease; }
 .toc-item + .toc-item { border-top: 1px solid var(--line); }
 .toc-item:hover { background: var(--panel2); color: var(--fg); }
-.toc-item.on { background: var(--panel2); color: var(--fg2); border-left-color: var(--accent); }
+/* 选中的那一章要一眼看得出来：底色压深、字变粗、左边那道竖线加厚 */
+.toc-item.on { background: var(--sel-bg); color: var(--sel-fg);
+               font-weight: 600; border-left: 3px solid var(--sel-line); padding-left: 13px; }
+.toc-item.on .pg { color: var(--sel-fg); opacity: .75; }
 .toc-item .pg { color: var(--dim3); font-size: 12px; }
 
 /* 讲义 */
@@ -308,6 +323,8 @@ button.danger:disabled { opacity: .4; }
   --chip-bg-hover:#1b2f42; --chip-fg-hover:#b9dcf5;
   --opt-on-bg:#16232f; --opt-on-fg:#dcebf9; --opt-on-b:#6fb3e8;
   --bad-bg:#241818; --bad-fg:#e5c9c9;
+  --accent-dark:#2c6fa8;
+  --sel-bg:#1d3145; --sel-fg:#e4f0fb; --sel-line:#5aa9e6;
   /* 布局量（不是颜色）：左栏宽度。管理模式下要塞下「全选 / 共 5 条 · 16.2 MB /
      删除选中 4 条」一行，200px 会把按钮挤出栏外被右栏盖住。 */
   --toc-w: 268px;
@@ -315,18 +332,22 @@ button.danger:disabled { opacity: .4; }
   --spring: cubic-bezier(.34, 1.56, .64, 1);
 }
 :root[data-theme="light"] {
-  --bg:#eef1f4; --top:#ffffff; --code:#e9edf2;
-  --panel:#ffffff; --panel2:#f2f4f7;
-  --line:#d6dbe3; --line2:#c6cdd7; --line3:#aeb8c5;
-  --fg:#12191f; --fg2:#05090d;
-  --dim:#39424e; --dim2:#48525f; --dim3:#5b6572;
-  --accent:#1d4ed8; --ok:#136c3a; --bad:#b3261e; --warn:#7a5c05;
-  --hl-bg:#dcf0e2; --hl-fg:#0d3a22; --hl-line:#2f8a55;
-  --top-line:#d6dbe3; --btn-bg:#1d4ed8; --btn-line:#1a45bd; --btn-fg:#ffffff;
-  --chip-bg:#eaf1fa; --chip-fg:#1c5aa3; --chip-line:#b7cbe4;
-  --chip-bg-hover:#dbe8f7; --chip-fg-hover:#164a86;
-  --opt-on-bg:#e8f0fb; --opt-on-fg:#12191f; --opt-on-b:#1d4ed8;
-  --bad-bg:#fdecea; --bad-fg:#8a1f18;
+  /* 浅色底再抬亮一档：原来 #eef1f4 偏灰，整屏看着发闷 */
+  --bg:#f7f9fc; --top:#ffffff; --code:#eff4fa;
+  --panel:#ffffff; --panel2:#f3f7fc;
+  --line:#e3eaf3; --line2:#d4dde8; --line3:#bcc8d8;
+  --fg:#1b2431; --fg2:#0c1420;
+  --dim:#3c4756; --dim2:#4b5765; --dim3:#5f6b7a;
+  --accent:#2563eb; --ok:#0f7a43; --bad:#c02b22; --warn:#7d5c05;
+  --hl-bg:#ddf2e6; --hl-fg:#0c3a22; --hl-line:#2f8a55;
+  --top-line:#e3eaf3; --btn-bg:#2563eb; --btn-line:#1d55d0; --btn-fg:#ffffff;
+  --chip-bg:#eaf2fe; --chip-fg:#1b5bbf; --chip-line:#c2d6f2;
+  --chip-bg-hover:#dcebfd; --chip-fg-hover:#14479a;
+  --opt-on-bg:#e6f0fd; --opt-on-fg:#1b2431; --opt-on-b:#2563eb;
+  --bad-bg:#fdeeec; --bad-fg:#8a1f18;
+  --accent-dark:#1d4fc4;
+  /* 选中的章节：底色压深一档，字加粗，左边竖线加厚 */
+  --sel-bg:#dbe8fb; --sel-fg:#12325f; --sel-line:#2563eb;
 }
 
 /* 颜色栏里的取色器 */

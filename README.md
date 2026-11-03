@@ -106,7 +106,7 @@ Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取�
       serve.py      FastAPI（上传、解析、布局、生成、SSE 进度、历史、设置、探活）
       cli.py        命令行入口
       web/          三栏界面（原生 DOM，无构建链）+ grade.js + vendor/katex
-    tests/          211 passed + 3 skipped（共 214 条）
+    tests/          213 passed + 3 skipped（共 216 条）
     docs/
       ROADMAP.md    现状、硬约束、完整计划、已知问题、接下来做什么
       DECISIONS.md  为什么这么做（每条都带踩过的坑）

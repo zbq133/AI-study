@@ -23,7 +23,7 @@
 | 项 | 状态 |
 |---|---|
 | 代码 | `app/` 12 个 Python 模块 **2164 行** + `app/web/` 四个文件 **1195 行**（另含本地 KaTeX 548 KB）+ `tests/` 11 个文件 **2160 行** |
-| 测试 | **211 passed + 3 skipped**（共 214 条；skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
+| 测试 | **213 passed + 3 skipped**（共 216 条；skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
 | HTTP 端点 | **17 个**（见 §7） |
 | 后端内核 | **约 95%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过；错误分类、取消、成本闸、历史索引都已就位 |
 | 外壳 | **约 90%**：CLI + 本地 Web 服务 + 探活 + 日志 + 一键启动脚本 |
@@ -656,7 +656,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q          # 必须 211 passed, 3 skipped
+.\.venv\Scripts\python.exe -m pytest -q          # 必须 213 passed, 3 skipped
 .\.venv\Scripts\python.exe -m app.serve          # 打开 127.0.0.1:8765 走一遍
 Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去脉
 ```

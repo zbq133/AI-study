@@ -175,7 +175,7 @@ def test_colors_all_come_from_the_palette(env):
         assert css.count(f"var({var})") >= 2, var
     # 浅色主题是覆盖变量，不许重复定义规则（那样会越改越乱）
     light = re.search(r":root\[data-theme=\"light\"\]\s*\{([^}]*)\}", css).group(1)
-    assert "--bg:#eef1f4" in light.replace(" ", "")
+    assert "--bg:#f7f9fc" in light.replace(" ", "")
 
 
 def _luminance(hex_color):
@@ -1199,3 +1199,30 @@ def test_ui_text_is_not_selectable_but_content_still_is(env):
     assert "#lessonBody .md *" in css
     assert "user-select: text" in rule("#sourceBody .blk")
     assert "user-select: text" in rule(".qans")
+
+
+def test_file_picker_button_follows_the_palette(env):
+    """原生「选择文件」是系统灰，跟蓝白配色不搭 —— 只认 ::file-selector-button 这个口子。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    btn = css[css.index("::file-selector-button"):]
+    btn = btn[:btn.index("}")]
+    assert "background: var(--accent)" in btn
+    assert "color: #fff" in btn
+    # 老 Chromium（含 WebView2 早期版本）只认 -webkit- 那个名字
+    assert "::-webkit-file-upload-button" in css
+
+
+def test_the_selected_chapter_is_darker_than_the_rest(env):
+    """选中一章要一眼看得出来：底色压深、加粗、左边竖线加厚。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+        html = client.get("/").text
+    on = css[css.index(".toc-item.on {"):]
+    on = on[:on.index("}")]
+    assert "var(--sel-bg)" in on and "font-weight: 600" in on
+    assert "border-left: 3px solid var(--sel-line)" in on
+    light = re.search(r":root\[data-theme=\"light\"\]\s*\{([^}]*)\}", css).group(1)
+    sel_bg = re.search(r"--sel-bg:(#[0-9a-f]{6})", light).group(1)
+    panel = re.search(r"--panel:(#[0-9a-f]{6})", light).group(1)
+    assert _contrast(sel_bg, panel) > 1.06, f"选中的底色和未选中几乎一样：{sel_bg} vs {panel}"
