@@ -242,7 +242,7 @@ def test_source_column_can_be_collapsed(env):
     rule = re.search(r"\.cols\.no-src\s*\{([^}]*)\}", css)
     assert rule, "收起来没有换栅格"
     # 必须是"目录 + 讲义"两栏，不能偷偷留成三栏（那样讲义也没变大）
-    assert re.search(r"grid-template-columns:\s*200px\s+minmax\(0,\s*1fr\)\s*;", rule.group(1)), rule.group(1)
+    assert re.search(r"grid-template-columns:\s*var\(--toc-w\)\s+minmax\(0,\s*1fr\)\s*;", rule.group(1)), rule.group(1)
     hidden = re.search(r"\.cols\.no-src\s+#source\s*\{([^}]*)\}", css)
     assert hidden and "none" in hidden.group(1)
     assert 'id="srcToggle"' in html
@@ -250,6 +250,20 @@ def test_source_column_can_be_collapsed(env):
     # 点出处的时候如果原文栏是收起的，要先展开，否则 scrollIntoView 打在一个 display:none 的块上
     ref = js.index("e.target.closest('.ref')")
     assert js.index("srcCollapsed()", ref) < js.index("scrollIntoView", ref)
+
+
+def test_history_bar_fits_inside_the_left_column(env):
+    """管理模式下那行按钮原来会被左栏边界裁掉一半：栏要够宽，挤不下也要能折行。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    toc = re.search(r"--toc-w:\s*(\d+)px", css)
+    assert toc, "左栏宽度得是个变量"
+    assert int(toc.group(1)) >= 250, f"左栏只有 {toc.group(1)}px，装不下「全选 / 共 N 条 / 删除选中」"
+    # 两套栅格都走变量，别只改一处
+    assert css.count("var(--toc-w)") >= 2
+    bar = re.search(r"\.histbar\s*\{([^}]*)\}", css)
+    assert bar and "flex-wrap: wrap" in bar.group(1), "挤不下就该折行，不能溢出到右栏"
+    assert re.search(r"#histDel\s*\{[^}]*margin-left:\s*auto", css), "按钮要靠右"
 
 
 def test_source_column_starts_collapsed_and_text_keeps_three_quarters(env):

@@ -394,3 +394,17 @@ devnull（让 `.isatty()` 调得动），`uvicorn.Config(log_config=None)` 让�
 **8. 脚本文件必须带 BOM**：`build_desktop.ps1` 里有中文，PowerShell 5.1 读无 BOM 的 UTF-8 会按 GBK
 解，直接解析失败。用编辑工具改完一次就掉 BOM，要补 `b'\xef\xbb\xbf'` 前缀。这已经是同一天第三次被
 编码坑到了（前两次：`Set-Content` 往返把测试文件写成乱码、`Out-File -Encoding UTF8` 加 BOM）。
+## 2026-11-03 补记：左栏宽度是个变量
+
+管理最近生成时那行「全选 / 共 5 条 · 16.2 MB / 删除选中 4 条」在 200px 的左栏里放不下，
+`删除选中` 按钮直接溢出到栏外面，被右栏盖住一半 —— 看起来像按钮坏了，其实是宽度不够。
+
+- 左栏宽度抽成 `--toc-w: 268px`，两处栅格（三栏 / 收起原文的两栏）都改成 `var(--toc-w)`。
+  只改一处会立刻露馅：切折叠状态时栏宽会跳一下。
+- `.histbar` 加 `flex-wrap: wrap` + `row-gap`：宁可整行折成两行，也不让按钮顶出边界。
+  `#histDel` 再给 `margin-left: auto`，折行后仍然贴右。
+- 判断标准写成测试（`test_history_bar_fits_inside_the_left_column`）：栏宽 ≥ 250px、
+  两处栅格都用变量、`.histbar` 必须能折行。四条变异（改回 200px、去掉 flex-wrap、
+  只改一处栅格、去掉 margin-left）全部被杀。
+- 教训：CSS 里的布局常数一旦被"内容变多"撑破，就会表现成"某个控件坏了"。
+  常量抽成变量不是为了好看，是为了让测试能盯住它。
