@@ -313,3 +313,65 @@ def test_paragraphs_keep_full_width_caption_separate():
              _row(caption, 120.0, x1=559.7)]
     out = _paragraphs(lines, 595.276)
     assert [t for t, *_ in out] == ["body line of the left column", caption]
+
+def _repeat_pdf(tmp_path, pages=4, header="Journal of Testing 2025", mid=None):
+    """造一份每页页眉相同、正文各不相同的小 PDF。"""
+    path = tmp_path / "repeat.pdf"
+    doc = fitz.open()
+    for i in range(pages):
+        p = doc.new_page()
+        p.insert_text((72, 40), header, fontsize=9)
+        if mid:
+            p.insert_text((72, 250), mid, fontsize=10)
+        p.insert_text((72, 400), "unique body line on page %d" % (i + 1), fontsize=10)
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_running_header_is_dropped_from_the_body_text(tmp_path):
+    """每页重复的页眉会被摘掉，正文一行不少。
+
+    位置修对之后（置顶）页眉仍在章节正文里：那份综述 14 页的 `C. Wang et al.`
+    混进了 9 个章节，会随 _render 一起喂给模型。
+    """
+    path = _repeat_pdf(tmp_path)
+    ir = extract_ir(path, ocr=False)
+    text = "\n".join(b.text for b in ir.blocks)
+    assert "Journal of Testing 2025" not in text
+    assert "unique body line on page 3" in text
+
+
+def test_phrase_repeated_mid_page_is_kept(tmp_path):
+    """正文中部反复出现的短语不能当页眉删掉 —— 它只是高频词，不是噪声。"""
+    path = _repeat_pdf(tmp_path, mid="lithium-ion battery")
+    ir = extract_ir(path, ocr=False)
+    text = "\n".join(b.text for b in ir.blocks)
+    assert "lithium-ion battery" in text
+    assert "Journal of Testing 2025" not in text
+
+
+def test_two_pages_are_not_enough_to_call_a_line_a_header(tmp_path):
+    """两页还不算"跨页重复"，门槛是 3 页 —— 短文档宁可留着。"""
+    path = _repeat_pdf(tmp_path, pages=2)
+    ir = extract_ir(path, ocr=False)
+    assert "Journal of Testing 2025" in "\n".join(b.text for b in ir.blocks)
+
+def test_a_line_that_also_appears_mid_page_is_not_treated_as_a_header(tmp_path):
+    """页眉那种短句如果在正文里也出现过，说明它是内容，不能删。
+
+    只按"每页最上一行 + 跨页重复"删，会把正文里引用的标题一起带走；所以还要
+    求这个文本从没在页面中部出现过。
+    """
+    path = tmp_path / "mixed.pdf"
+    doc = fitz.open()
+    for i in range(4):
+        p = doc.new_page()
+        p.insert_text((72, 40), "Key Findings", fontsize=9)
+        if i == 1:
+            p.insert_text((72, 250), "Key Findings", fontsize=10)
+        p.insert_text((72, 400), "unique body line on page %d" % (i + 1), fontsize=10)
+    doc.save(str(path))
+    doc.close()
+    ir = extract_ir(path, ocr=False)
+    assert "Key Findings" in "\n".join(b.text for b in ir.blocks)

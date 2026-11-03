@@ -215,6 +215,45 @@ def _paragraphs(lines, page_w):
     return out
 
 
+_REPEAT_MIN_PAGES = 3
+_REPEAT_MIN_SHARE = 0.2
+_REPEAT_MAX_CHARS = 80
+_REPEAT_EDGE_TOL = 1.0
+
+
+def _running_lines(pages):
+    """找出跨页重复、又只在页面最上/最下一行出现的短文本 —— 页眉、页脚、期刊名。
+
+    这些行每页都来一遍，留在正文里就是白喂给模型的噪声：那份综述 14 页的
+    `C. Wang et al.` 位置修对之后，文本仍然混进了 9 个章节的正文。
+
+    四条门槛一起上，宁可漏掉也不误删正文：
+    1. 归一化（压空白、转小写）后逐字相同；
+    2. 至少在 3 页、且至少占全文 20% 的页数上出现 —— 同一页重复几次不算；
+    3. 归一化后不超过 80 字 —— 再长更可能是正文小标题；
+    4. 每次出现都在该页的最上一行或最下一行（容差 1pt），而且这个文本**从没**
+       在页面中部出现过。第 4 条是关键：正文里的高频短语（`lithium-ion battery`）
+       会落在栏中间，只要出现过一次中部就赦免。
+    """
+    seen = {}
+    mid = set()
+    for _pno, lines, _w, _h in pages:
+        if not lines:
+            continue
+        top = min(l[3][1] for l in lines)
+        bottom = max(l[3][3] for l in lines)
+        for text, _size, _bold, bbox in lines:
+            key = " ".join(text.split()).lower()
+            if not key or len(key) > _REPEAT_MAX_CHARS:
+                continue
+            if bbox[1] <= top + _REPEAT_EDGE_TOL or bbox[3] >= bottom - _REPEAT_EDGE_TOL:
+                seen.setdefault(key, set()).add(_pno)
+            else:
+                mid.add(key)
+    need = max(_REPEAT_MIN_PAGES, int(len(pages) * _REPEAT_MIN_SHARE))
+    return {k for k, ps in seen.items() if k not in mid and len(ps) >= need}
+
+
 def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
     """把 PDF 变成 DocIR。
 
@@ -250,6 +289,16 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
             f"{path.name}：{doc.page_count} 页里没有任何文字层（扫描件或图片型课件）。"
             "传 ocr=True 让它走 OCR：extract_ir(path, ocr=True)"
         )
+    # 页眉页脚先摘掉，再算字号基准、再排阅读顺序 —— 留着它们，基准和段落都会
+    # 被这些每页重复的短行带偏。
+    drop = _running_lines(raw)
+    if drop:
+        cleaned = [(pno, [l for l in lines
+                          if " ".join(l[0].split()).lower() not in drop], w, h)
+                   for pno, lines, w, h in raw]
+        if any(lines for _, lines, *_ in cleaned):
+            raw = cleaned
+
     base = _mode_size([(l[1], len(l[0])) for _, lines, *_ in raw for l in lines])
 
     toc = [[lvl, title, pno] for lvl, title, pno in (doc.get_toc() or [])]
