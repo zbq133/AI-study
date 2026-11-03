@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import json
 import os
 import threading
 import time
@@ -28,6 +29,7 @@ from .errors import MissingConfig, describe
 from .llm import LLM
 from .pdf import extract_ir, page_block_map
 from .pipeline import build_lesson
+from .store import Store, make_id
 from .schema import build_sections, is_reference_title
 
 load_dotenv()
@@ -239,7 +241,21 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
     job.calls = getattr(llm, "calls", 0)
     job.prompt_tokens = getattr(llm, "prompt_tokens", 0)
     job.completion_tokens = getattr(llm, "completion_tokens", 0)
-    job.result = {"file": str(out), "chapter": chapter,
+    rec = _store().put({
+        "id": make_id(doc_id, chapter),
+        "doc_id": doc_id,
+        "chapter": chapter,
+        "filename": DOCS[doc_id]["filename"],
+        "file": out.name,
+        "pages": len(lesson.sections),
+        "sections": len(lesson.sections),
+        "quiz": len(lesson.quiz),
+        "calls": job.calls,
+        "prompt_tokens": job.prompt_tokens,
+        "completion_tokens": job.completion_tokens,
+        "seconds": round((job.t1 or time.time()) - job.t0, 1),
+    })
+    job.result = {"file": str(out), "chapter": chapter, "lesson_id": rec["id"],
                   "sections": len(lesson.sections), "quiz": len(lesson.quiz),
                   "lesson": lesson.model_dump()}
 
@@ -345,6 +361,42 @@ async def create_lesson(req: LessonReq) -> dict:
     job = _new_job("lesson", req.chapter)
     _spawn(job, _do_lesson, req.doc_id, req.chapter, n)
     return {"job_id": job.id}
+
+
+def _store() -> Store:
+    """每次现读 OUT_DIR —— 测试里会被 monkeypatch 到临时目录。"""
+    return Store(OUT_DIR)
+
+
+@app.get("/api/lessons")
+async def list_lessons(q: str = "", limit: int = 50) -> dict:
+    """生成过的讲义。重启之后还在，因为落在 out/index.json 里。"""
+    return {"lessons": _store().list(q, limit=max(1, min(limit, 200)))}
+
+
+@app.get("/api/lessons/{lesson_id}")
+async def get_lesson(lesson_id: str) -> dict:
+    rec = _store().get(lesson_id)
+    if rec is None:
+        raise HTTPException(404, "没有这份讲义")
+    path = _store().file_of(lesson_id)
+    if path is None:
+        raise HTTPException(410, "讲义文件被删了，重新生成一次")
+    return {"record": rec, "lesson": json.loads(path.read_text(encoding="utf-8"))}
+
+
+@app.delete("/api/lessons/{lesson_id}")
+async def delete_lesson(lesson_id: str) -> dict:
+    st = _store()
+    path = st.file_of(lesson_id)
+    if not st.delete(lesson_id):
+        raise HTTPException(404, "没有这份讲义")
+    if path is not None:
+        try:
+            path.unlink()
+        except OSError:
+            pass                                  # 索引已经删了，文件删不掉不影响
+    return {"ok": True}
 
 
 @app.post("/api/jobs/{job_id}/cancel")

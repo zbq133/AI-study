@@ -388,3 +388,59 @@ def test_a_broken_limit_falls_back_to_the_default(monkeypatch):
     assert serve._limit("LESSON_MAX_CALLS", 40) == 1
     monkeypatch.delenv("LESSON_MAX_CALLS")
     assert serve._limit("LESSON_MAX_CALLS", 40) == 40
+
+
+# ---------------------------------------------------------------- 历史与索引
+
+def test_finished_lesson_shows_up_in_history(doc_pdf, monkeypatch):
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        job_id = _lesson_job(client, doc_pdf)
+        snap = _wait(client, job_id)
+        assert snap["state"] == "done", snap["error"]
+        lid = snap["result"]["lesson_id"]
+        rows = client.get("/api/lessons").json()["lessons"]
+        one = client.get(f"/api/lessons/{lid}").json()
+    assert [r["id"] for r in rows] == [lid]
+    assert rows[0]["chapter"] == "Chapter 1 Introduction"
+    assert rows[0]["quiz"] == 1
+    assert rows[0]["calls"] >= 1
+    assert one["lesson"]["sections"][0]["title"]          # 讲义本体能直接读回来
+
+def test_history_search_filters(doc_pdf, monkeypatch):
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        _wait(client, _lesson_job(client, doc_pdf))
+        assert len(client.get("/api/lessons?q=Introduction").json()["lessons"]) == 1
+        assert client.get("/api/lessons?q=静电场").json()["lessons"] == []
+
+
+def test_delete_lesson_removes_the_file_too(doc_pdf, monkeypatch):
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        snap = _wait(client, _lesson_job(client, doc_pdf))
+        lid = snap["result"]["lesson_id"]
+        path = Path(snap["result"]["file"])
+        assert path.exists()
+        assert client.delete(f"/api/lessons/{lid}").status_code == 200
+        assert client.get("/api/lessons").json()["lessons"] == []
+        assert client.get(f"/api/lessons/{lid}").status_code == 404
+    assert not path.exists()
+
+def test_unknown_lesson_is_404(env):
+    with TestClient(serve.app) as client:
+        assert client.get("/api/lessons/nope").status_code == 404
+        assert client.delete("/api/lessons/nope").status_code == 404
+
+def test_lesson_whose_file_vanished_says_410(env):
+    """索引还在、文件被人手动删了 —— 说清楚要重新生成，别 500。"""
+    with TestClient(serve.app) as client:
+        serve._store().put({"id": "gone", "chapter": "第一章", "file": "gone.json"})
+        r = client.get("/api/lessons/gone")
+    assert r.status_code == 410

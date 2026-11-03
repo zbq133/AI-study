@@ -252,9 +252,61 @@ $('#go').onclick = async () => {
       $('#goMeta').textContent = `${s.result.sections || 0} 节 · ${s.result.quiz || 0} 题 · ${s.elapsed}s`;
       renderLesson(lesson);
       renderSource();
+      loadHistory();            // 新的排到历史最前面
     }
   });
 };
+
+/* ---------------- 历史：重启之后还认得的那些讲义 ---------------- */
+
+async function loadHistory() {
+  let rows = [];
+  try {
+    const r = await fetch('/api/lessons');
+    if (r.ok) rows = (await r.json()).lessons || [];
+  } catch (e) { rows = []; }
+  const box = $('#histBody');
+  box.innerHTML = '';
+  if (!rows.length) {
+    box.innerHTML = '<div class="hint sm">还没有生成过讲义。</div>';
+    return;
+  }
+  for (const rec of rows) {
+    const b = document.createElement('button');
+    b.className = 'hist-item';
+    b.dataset.id = rec.id;
+    b.title = `${rec.filename || ''} · ${rec.chapter} · ${rec.updated || ''}`;
+    b.innerHTML = `${esc(rec.chapter)}` +
+      `<span class="when">${rec.quiz || 0} 题</span>`;
+    box.appendChild(b);
+  }
+}
+
+/** 打开一份旧讲义。原文栏要能显示才有意义 —— 那份 PDF 得还在内存里。 */
+async function openLesson(id) {
+  const r = await fetch(`/api/lessons/${id}`);
+  if (!r.ok) {
+    fail(null, (await r.json()).detail || '打不开这份讲义');
+    return;
+  }
+  const { record, lesson: L } = await r.json();
+  lesson = L;
+  renderLesson(L);
+  $('#err').textContent = '';
+  if (record.doc_id && record.doc_id === docId) {
+    renderSource();            // 同一份 PDF 还开着，原文照旧能点
+  } else {
+    $('#sourceBody').innerHTML =
+      '<p class="hint">这是之前生成的讲义，原 PDF 已经不在内存里了。' +
+      '重新上传同一份 PDF 解析一次，就能点出处回原文。</p>';
+    $('#srcMeta').textContent = '';
+  }
+}
+
+$('#histBody').addEventListener('click', e => {
+  const b = e.target.closest('.hist-item');
+  if (b) openLesson(b.dataset.id);
+});
 
 /* ---------------- 讲义 ---------------- */
 
@@ -445,3 +497,6 @@ $('#lesson').addEventListener('click', e => {
     document.querySelectorAll(`.blk[data-id="${id}"]`).forEach(x => x.classList.add('hl')));
   first.scrollIntoView({ block: 'center', behavior: 'smooth' });
 });
+
+/* 页面一打开就把历史列出来 —— 不依赖用户先传 PDF。 */
+loadHistory();

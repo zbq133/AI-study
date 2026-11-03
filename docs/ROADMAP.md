@@ -234,19 +234,19 @@ no-cache、越界 404、类型不随系统猜测变）；变异四条全部击�
 **明确不要做的事**：不引入 Vite / React / npm。
 理由：现在 `python -m app.serve` → 刷新浏览器就能看到改动，没有构建等待。引入打包器会让"改一行等 30 秒 build"成为日常，而这个项目的前端复杂度（三栏 + 高亮 + 自测）用原生 DOM + 一点点事件委托完全够。等到超过 2000 行再议。
 
-#### P0-3 生成记录要有索引
+#### P0-3 生成记录要有索引 ✅（2026-11-03 已做）
 
 现在成品是散在 `out/` 里的 JSON 文件，重启服务后 `DOCS` 内存字典清空，之前的 doc_id 全废，用户找不到自己生成过什么。
 
-**怎么改**：`out/index.json`（或直接 sqlite，`sqlite3` 是标准库不用装依赖）。
+**落地形态**：`app/store.py` + `out/index.json`（没用 sqlite —— 文件就几百条，读取整份重写更简单，也不多一个并发问题）。
 
-```json
-[{"lesson_id": "…", "doc_id": "…", "filename": "…", "chapter": "…",
-  "created": "2026-11-03T21:00:00+08:00", "sections": 5, "quiz": 3,
-  "calls": 13, "prompt_tokens": 19136, "completion_tokens": 6883}]
-```
-
-加 `GET /api/lessons` 列表 + `GET /api/lessons/{id}` 读单份。
+- 一条讲义一行：`{id, doc_id, chapter, filename, file, sections, quiz, calls, prompt_tokens, completion_tokens, seconds, created, updated}`。
+- **id 由 `sha1(doc_id + chapter)[:12]` 决定**：同一份 PDF 的同一章重新生成就是覆盖，不留一堆同名文件；`created` 保留首次时间，`updated` 每次刷新。
+- 写入走临时文件 + `os.replace`，中途崩了不会留下半截 JSON；索引被人手改坏了就当空的用（下次写入重排），不让它把服务拖死。
+- `file` 字段只按文件名解析（`out_dir / Path(file).name`），记录被写成 `../secret.json` 也读不到外面。
+- 端点：`GET /api/lessons?q=&limit=`、`GET /api/lessons/{id}`（记录 + 讲义本体）、`DELETE /api/lessons/{id}`（连文件一起删）。
+- 记录在、文件被手删 → `410 讲义文件被删了，重新生成一次`，不是 500。
+- 左栏顶部加"最近生成"，点一条就把讲义渲染出来；**原文栏只在原 PDF 还在内存里时才有内容**（重启后 doc_id 就没了，这时列表能看、出处点不回原文）。
 
 **验收**：重启服务后历史记录还在，能量出来、能打开。
 
@@ -516,7 +516,7 @@ Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去�
 | ~~P1~~ | ~~讲义里的 `$公式$` 在界面上原样显示~~ | `app/web/` | 已接本地 KaTeX（离线 vendor） |
 | P1 | ~~生成不能取消~~ | `app/serve.py` | 已做（`cancel_evt` + 调用前查，P1-3） |
 | P1 | ~~错误只有一句 traceback~~ | `app/errors.py` | 已做（kind + title + hint，P1-5） |
-| P1 | 历史记录无索引，重启即丢 | `out/*.json` | 待做 |
+| P1 | ~~历史记录无索引，重启即丢~~ | `app/store.py` | 已做（`out/index.json`，P0-3） |
 | P1 | 出题阶段（30 秒）进度不动 | `app/pipeline.py:136` | 待做 |
 | P1 | OCR 阶段无页级进度 | `app/ocr.py` | 待做 |
 | P1 | 成本只显示调用次数，没折成钱 | `app/web/app.js` | 待做（P1-4 余下部分） |

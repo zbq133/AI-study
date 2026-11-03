@@ -54,6 +54,15 @@ button.ghost { background: transparent; border-color: #2c3541; color: #9aa6b2; }
 
 /* 目录 */
 #tocBody { padding: 8px 0 60px; }
+
+/* 历史：一条一行，章节名太长就省略，别把左栏撑开 */
+.hist { max-height: 34%; overflow-y: auto; padding: 4px 0; flex: 0 0 auto;
+        border-bottom: 1px solid #1a212a; }
+.hist-item { display: block; width: 100%; text-align: left; padding: 6px 14px;
+             border: 0; background: transparent; color: #9aa6b2; font-size: 12.5px;
+             cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-item:hover { background: #151b23; color: #d6dee7; }
+.hist-item .when { color: #5f6a76; font-size: 11px; margin-left: 6px; }
 .toc-item { display: block; width: 100%; text-align: left; padding: 7px 14px;
             border: 0; background: transparent; color: #9aa6b2; font-size: 12.5px;
             line-height: 1.45; cursor: pointer; border-left: 2px solid transparent; }
