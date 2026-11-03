@@ -111,3 +111,54 @@ gemini -p "..."
 ```
 
 主人自己新开的 PowerShell 窗口不用这一步，环境变量天然就在。
+
+---
+
+## 另一条路：Antigravity CLI（`agy`）—— 用 Google AI Pro 订阅
+
+**Gemini CLI（`gemini`）对 Google AI Pro / Ultra 个人用户已于 2026-06-18 停止服务**，
+官方继任者是 Antigravity CLI，命令 `agy`。上面那一整套 `GEMINI_API_KEY` 做法是"按请求付费"
+的免费层路线（5 次/分钟），和订阅路线无关，两者可以共存。
+
+安装（已在本机装好，版本 1.4.12）：
+
+```powershell
+irm https://antigravity.google/cli/install.ps1 | iex
+# 二进制落在 %LOCALAPPDATA%\agy\bin\agy.exe，并写入用户 PATH（要新开终端才生效）
+```
+
+第一次用要登录（这一步只能人来点浏览器）：
+
+```powershell
+cd "D:\AI study"
+agy            # 无参数启动 → 浏览器用 Google 账户登录
+agy models     # 登录后确认能选哪些模型
+```
+
+### 关键事实：12 个月学生免费订阅 = **Google AI Pro (Trial)**，不算付费
+
+官方论坛（Antigravity 团队回复，2026-10-19）明确：促销版、学生版、合作捆绑的 12 个月免费
+Google AI Pro 在所有 Antigravity 界面（App / CLI / IDE 扩展 / 独立 IDE）里都按
+**Google AI Pro (Trial)** 计。结果是：
+
+| 模型 | Free / AI Plus | **Pro（Trial，含学生 12 个月）** | Pro（**付费/非试用**） | Ultra |
+| --- | --- | --- | --- | --- |
+| Gemini 4 Argon | ❌ | **❌** | ✅ | ✅ |
+| Claude Sonnet / Opus 5.5 | ❌ | **❌** | ✅ | ✅ |
+| Gemini 3.8 Flash | ✅ | ✅ | ✅ | ✅ |
+
+- Claude Sonnet/Opus 4.6 与 GPT-OSS-120b **已于 2026-11-02 下线**，所以现在学生订阅账号里
+  大概率只剩 **Gemini 3.8 Flash**（思考等级 Low / Medium / High 都在），但额度是 Pro 档
+  （5 小时刷新 + 每周上限），比免费层宽得多。
+- 想解锁 Argon：等学生优惠到期转成**计费订阅**，或提前转（Google One 支持页提申请）。
+  首次扣费后权限同步一般几小时内、最多 24–48 小时；没出现就登出重登或
+  `Ctrl+Shift+P → Antigravity: Reset Onboarding`。
+- 另外 Argon 本身有**界面限制**：只在 Antigravity App（≥2.24.0）、Antigravity CLI（≥1.4.2）
+  和 IDE 扩展里提供，**独立 Antigravity IDE v2.5.5 里没有**（官方说明，无时间表）。
+
+### 用哪个
+
+- 日常改这个仓库：`agy`（吃订阅额度，Gemini 3.8 Flash 足够；`/effort` 调思考等级，
+  `/usage` 看额度，`/diff` 看改动，`/plan` 先出方案）。
+- 想让"第二双眼睛"评一评：`gemini -p "..."`（免费层，5 RPM，一次一问）。
+- `agy` 会自动读项目根的 `AGENTS.md`，那份里已经写了"先读 GEMINI.md 和 docs/ROADMAP.md"。
