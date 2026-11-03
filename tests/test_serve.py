@@ -266,6 +266,61 @@ def test_theme_reaches_the_page_before_the_first_paint(env):
     assert "function applyTheme" in js and "dataset.theme" in js
 
 
+def test_settings_are_split_into_four_tabs(env):
+    """模型接入 / 颜色 / 字号 / 版本 各是一个标签，点哪个只显示哪个。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+    assert 'id="setTabs"' in html
+    tabs = re.findall(r'class="tab[^"]*"\s+data-tab="(\w+)"[^>]*>([^<]+)<', html)
+    assert [t[0] for t in tabs] == ["model", "theme", "font", "about"], tabs
+    assert [t[1].strip() for t in tabs] == ["模型接入", "颜色", "字号", "版本"]
+    panes = re.findall(r'class="pane([^"]*)"\s+data-pane="(\w+)"', html)
+    assert [p[1] for p in panes] == ["model", "theme", "font", "about"], panes
+    # 除了模型接入，其余三个一开始都是 hide
+    assert panes[0][0].strip() == ""
+    assert all("hide" in p[0] for p in panes[1:]), panes
+    assert "function showTab" in js
+    assert "p.dataset.pane !== name" in js or "dataset.pane !== name" in js
+
+
+def test_font_size_has_three_steps_and_applies_before_paint(env):
+    """字号三档（小/中/大），用 zoom 整体缩放，而且在 <head> 里就先套上。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+    assert 'id="fontMode"' in html
+    steps = re.findall(r'data-size="(\w+)"[^>]*>([^<]+)<', html)
+    assert [s[0] for s in steps] == ["small", "normal", "large"], steps
+    assert [s[1].strip() for s in steps] == ["小", "中", "大"]
+    # 三档必须真的不一样大，否则"大"和"中"看不出区别
+    scale = re.search(r"FONT_SCALE\s*=\s*\{([^}]*)\}", js)
+    assert scale, "没有字号档位表"
+    nums = [float(x) for x in re.findall(r":\s*([\d.]+)", scale.group(1))]
+    assert len(nums) == 3 and nums[0] < nums[1] < nums[2], nums
+    assert "style.zoom" in js, "没有真正缩放"
+    assert re.search(r"style\.zoom\s*=\s*String\(scale\)", js), "缩放没按档位来，等于没效果"
+    # 首屏就要套上，不然打开时字会先小一下再变大
+    head = html[:html.index("</head>")]
+    assert "study.font" in head and "zoom" in head
+    assert head.index("study.font") < html.index("/static/app.js")
+
+
+def test_version_tab_shows_the_version_and_has_an_update_button(env):
+    """版本标签要显示版本号，旁边有「更新」按钮，点了会去问服务端。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+        health = client.get("/api/health").json()
+    assert 'id="verNow"' in html and "v1.0" in html
+    assert re.search(r'id="updBtn"[^>]*>更新<', html), "没有「更新」按钮"
+    assert health["version"] == serve.__version__ == "1.0"
+    assert "/api/health" in js and "location.reload()" in js
+    # 打开设置时就要把服务端的版本号写回页面，不能一直显示写死的那个
+    body = js[js.index("async function paintVersion"):js.index("$('#updBtn')")]
+    assert "$('#verNow').textContent = 'v'" in body, "拿到的版本号没写回页面"
+
+
 def test_quiz_hides_answers_until_the_student_answers(env):
     """答题前不出对策：答案解析和出处都塞在 .qans 里，初始必须带 hide。"""
     with TestClient(serve.app) as client:

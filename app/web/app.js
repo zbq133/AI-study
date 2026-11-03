@@ -589,6 +589,8 @@ function paintSettings(payload) {
 async function openSettings() {
   $('#setModal').classList.remove('hide');
   paintTheme();
+  paintFont();
+  paintVersion();
   $('#setMsg').textContent = '读设置……';
   try {
     paintSettings(await (await fetch('/api/settings')).json());
@@ -652,6 +654,85 @@ $('#setTest').onclick = async () => {
       : '没问到模型列表：地址/密钥可能不对，或者这家不提供 /models';
   } catch (e) {
     $('#setMsg').textContent = String(e.message || e);
+  }
+};
+
+/* ---------- 设置里的标签页 ---------- */
+
+function showTab(name) {
+  document.querySelectorAll('#setTabs .tab')
+    .forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('.pane')
+    .forEach(p => p.classList.toggle('hide', p.dataset.pane !== name));
+}
+
+$('#setTabs').onclick = e => {
+  const b = e.target.closest('.tab');
+  if (b) showTab(b.dataset.tab);
+};
+
+/* ---------- 字号 ---------- */
+
+const FONT_KEY = 'study.font';
+// 用 zoom 整体缩放：这套样式全是 px，只改根字号不会动 90% 的规则。
+const FONT_SCALE = { small: 0.9, normal: 1, large: 1.16 };
+
+function readFont() {
+  let v = 'normal';
+  try { v = localStorage.getItem(FONT_KEY) || 'normal'; } catch (e) { /* 无痕模式就读不到 */ }
+  return FONT_SCALE[v] ? v : 'normal';
+}
+
+function applyFont(name) {
+  const scale = FONT_SCALE[name] || 1;
+  if (scale === 1) document.documentElement.style.removeProperty('zoom');
+  else document.documentElement.style.zoom = String(scale);
+}
+
+function paintFont() {
+  const cur = readFont();
+  document.querySelectorAll('#fontMode button')
+    .forEach(b => b.classList.toggle('on', b.dataset.size === cur));
+}
+
+$('#fontMode').onclick = e => {
+  const b = e.target.closest('button[data-size]');
+  if (!b) return;
+  try { localStorage.setItem(FONT_KEY, b.dataset.size); } catch (err) { /* 无所谓 */ }
+  applyFont(b.dataset.size);
+  paintFont();
+};
+
+/* ---------- 版本 ---------- */
+
+let _serverVer = '';
+
+async function paintVersion() {
+  try {
+    const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
+    _serverVer = h.version || '';
+    if (_serverVer) $('#verNow').textContent = 'v' + _serverVer;
+  } catch (e) { /* 拿不到就留着页面上写死的那个 */ }
+}
+
+$('#updBtn').onclick = async () => {
+  const btn = $('#updBtn');
+  btn.disabled = true;
+  $('#verMsg').textContent = '正在核对版本……';
+  try {
+    const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
+    const now = h.version || '';
+    if (now && now !== _serverVer) {
+      $('#verNow').textContent = 'v' + now;
+      $('#verMsg').textContent = `发现 v${now}，正在重新拉界面……`;
+      setTimeout(() => location.reload(), 700);
+      return;
+    }
+    $('#verMsg').textContent = `已经是最新版本 v${now || _serverVer || '1.0'}。`;
+  } catch (e) {
+    $('#verMsg').textContent = '问不到服务端版本：服务可能没起来。';
+  } finally {
+    btn.disabled = false;
   }
 };
 
@@ -732,6 +813,8 @@ $('#themeMode').addEventListener('click', e => {
   });
 
 applyTheme(readTheme());
+applyFont(readFont());
+paintFont();
 
 /* ---------- 原文栏可折叠 ---------- */
 

@@ -6,7 +6,8 @@
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/app.css">
 <script>
-/* 先把主题套上再画，否则暗色页面会先闪一下白。逻辑在 app.js，这里只负责"早一步"。 */
+/* 先把主题和字号套上再画，否则暗色页面会先闪一下白、字会先小一下再变大。
+   正式逻辑在 app.js，这里只负责"早一步"。 */
 (function () {
   try {
     var t = JSON.parse(localStorage.getItem('study.theme') || 'null') || {};
@@ -16,6 +17,9 @@
         document.documentElement.style.setProperty(k, t.custom[k]);
       });
     }
+    var f = localStorage.getItem('study.font');
+    var scale = f === 'small' ? 0.9 : (f === 'large' ? 1.16 : 1);
+    if (scale !== 1) document.documentElement.style.zoom = String(scale);
   } catch (e) { /* 存坏了就当没设置过 */ }
 })();
 </script>
@@ -76,9 +80,14 @@
       <button class="ghost" id="setClose" title="关掉">×</button>
     </div>
 
-    <div class="sect">
-      <div class="secttitle">① 模型接入</div>
+    <div class="tabs" id="setTabs">
+      <button type="button" class="tab on" data-tab="model">模型接入</button>
+      <button type="button" class="tab" data-tab="theme">颜色</button>
+      <button type="button" class="tab" data-tab="font">字号</button>
+      <button type="button" class="tab" data-tab="about">版本</button>
+    </div>
 
+    <div class="pane" data-pane="model">
       <label class="field">
         <span>接入地址</span>
         <input id="setUrl" type="text" spellcheck="false"
@@ -114,9 +123,7 @@
       </div>
     </div>
 
-    <div class="sect">
-      <div class="secttitle">② 颜色</div>
-
+    <div class="pane hide" data-pane="theme">
       <div class="field">
         <span>主题</span>
         <div class="seg" id="themeMode">
@@ -136,6 +143,34 @@
           <label class="swatch">强调<input type="color" id="cAccent"></label>
         </div>
         <em class="src">背景和面板别选成一样，三栏的边界会看不出来。</em>
+      </div>
+    </div>
+
+    <div class="pane hide" data-pane="font">
+      <div class="field">
+        <span>页面字号</span>
+        <div class="seg" id="fontMode">
+          <button type="button" data-size="small">小</button>
+          <button type="button" data-size="normal">中</button>
+          <button type="button" data-size="large">大</button>
+        </div>
+        <em class="src">选完立刻生效，存在这台电脑的浏览器里，不用保存。</em>
+      </div>
+
+      <div class="field">
+        <span>预览</span>
+        <p class="fonthint">机械波的波速由介质的弹性和惯性决定，与波源振动频率无关；波源只决定周期和频率。</p>
+      </div>
+    </div>
+
+    <div class="pane hide" data-pane="about">
+      <div class="field">
+        <span>版本</span>
+        <div class="verline">
+          <b id="verNow">v1.0</b>
+          <button type="button" class="ghost" id="updBtn">更新</button>
+        </div>
+        <em class="src" id="verMsg">点「更新」会去问一下服务端的版本号，不一样就把界面重新拉一遍。</em>
       </div>
     </div>
   </div>
