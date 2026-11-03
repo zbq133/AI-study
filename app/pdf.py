@@ -4,7 +4,7 @@ import hashlib
 import re
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 
 from .errors import BadPDF, Cancelled, EmptyDocument
 from .schema import Block, DocIR

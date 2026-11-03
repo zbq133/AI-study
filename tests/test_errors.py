@@ -1,7 +1,7 @@
 """错误分类的单元测试：认得出、说得清、不吞掉细节。"""
 from app.errors import (BadPDF, Cancelled, ChapterNotFound, EmptyDocument, LLMAuth,
-                        LLMQuota, LLMTimeout, LLMUnavailable, MissingConfig, StudyError,
-                        describe, wrap_llm_error)
+                        LLMBusy, LLMQuota, LLMTimeout, LLMUnavailable, MissingConfig,
+                        StudyError, describe, wrap_llm_error)
 
 
 class _Fake(Exception):
@@ -28,7 +28,7 @@ def test_wraps_by_status_code_when_the_name_is_new():
     assert isinstance(wrap_llm_error(_named("WeirdError", 401)), LLMAuth)
     assert isinstance(wrap_llm_error(_named("WeirdError", 429)), LLMQuota)
     assert isinstance(wrap_llm_error(_named("WeirdError", 504)), LLMTimeout)
-    assert isinstance(wrap_llm_error(_named("WeirdError", 503)), LLMUnavailable)
+    assert isinstance(wrap_llm_error(_named("WeirdError", 503)), LLMBusy)
 
 
 def test_unknown_error_keeps_its_own_text():
@@ -46,7 +46,7 @@ def test_already_classified_passes_through():
 def test_every_kind_has_a_title_and_a_hint():
     """前端直接显示 title/hint，缺一个就是界面上空一块。"""
     for cls in (EmptyDocument, BadPDF, MissingConfig, ChapterNotFound, Cancelled,
-                LLMAuth, LLMQuota, LLMTimeout, LLMUnavailable):
+                LLMAuth, LLMBusy, LLMQuota, LLMTimeout, LLMUnavailable):
         assert cls.title and len(cls.title) <= 20, cls
         assert cls.hint, cls
         assert cls.kind != "unknown", cls

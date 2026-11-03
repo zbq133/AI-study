@@ -85,6 +85,12 @@ class LLMUnavailable(StudyError):
     hint = "看 base_url 和网络（代理开着吗）。这类失败重试往往没用，先确认服务可用。"
 
 
+class LLMBusy(StudyError):
+    kind = "llm_busy"
+    title = "模型服务繁忙"
+    hint = "对方服务太忙（5xx），等半分钟再试；一直这样就是服务端过载。"
+
+
 class LLMBadJSON(StudyError):
     kind = "llm_bad_json"
     title = "模型没按格式回话"
@@ -100,7 +106,7 @@ _BY_NAME = {
     "APITimeoutError": LLMTimeout,
     "Timeout": LLMTimeout,
     "APIConnectionError": LLMUnavailable,
-    "InternalServerError": LLMUnavailable,
+    "InternalServerError": LLMBusy,
     "APIStatusError": LLMUnavailable,
     "APIError": LLMUnavailable,
 }
@@ -120,7 +126,7 @@ def wrap_llm_error(exc: BaseException) -> StudyError:
         elif code == 408 or code == 504:
             cls = LLMTimeout
         elif isinstance(code, int) and code >= 500:
-            cls = LLMUnavailable
+            cls = LLMBusy
     if cls is None:
         return StudyError(f"{type(exc).__name__}: {exc}")
     return cls(str(exc)[:400])

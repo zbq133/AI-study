@@ -6,8 +6,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .errors import StudyError, describe
 from .llm import LLM
-from .pdf import NoTextLayer, extract_ir
+from .pdf import extract_ir
 from .pipeline import build_lesson
 from .schema import build_sections, is_reference_title
 
@@ -15,17 +16,33 @@ load_dotenv()
 REQUIRED = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
 
 
+def _report(exc: BaseException) -> None:
+    """把失败说成人话：title 一句话 + hint 怎么办；认不出的错误才亮 detail。"""
+    info = describe(exc)
+    print(f"{info['title']}")
+    if info["hint"]:
+        print(info["hint"])
+    if info["kind"] == "unknown":
+        print(info["detail"])
+
+
 def main() -> int:
-    if len(sys.argv) < 3:
-        print("用法: python -m app.cli <pdf路径> <章节名> [题数]")
+    if len(sys.argv) < 2:
+        print("用法: python -m app.cli <pdf路径> [章节名或序号] [题数]")
         return 2
-    pdf_path, chapter = sys.argv[1], sys.argv[2]
-    n = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+    pdf_path = sys.argv[1]
+    chapter = sys.argv[2] if len(sys.argv) > 2 else ""
+    try:
+        n = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+    except ValueError:
+        print(f"题数要写数字：{sys.argv[3]}")
+        return 2
 
     try:
         ir = extract_ir(pdf_path)
-    except NoTextLayer as exc:
-        print(f"解析失败：{exc}")
+    except StudyError as exc:
+        print()
+        _report(exc)
         return 4
     print(f"解析完成：{ir.page_count} 页 / {len(ir.blocks)} 个块")
 
@@ -37,6 +54,11 @@ def main() -> int:
     skipped = len(secs) - len(shown)
     if skipped:
         print(f"  （另有 {skipped} 条参考文献段已隐藏，序号仍是它在全书里的位置）")
+
+    if not chapter:
+        print("\n给个章节名或序号再跑一遍就会生成讲义，例如：")
+        print('  python -m app.cli "<pdf路径>" "第1章" 5')
+        return 0
 
     if chapter.isdigit():                      # 允许直接写列表里的序号
         idx = int(chapter)
@@ -55,8 +77,9 @@ def main() -> int:
               os.environ["LLM_MODEL"])
     try:
         lesson = build_lesson(llm, ir, chapter, n)
-    except ValueError as exc:
-        print(f"\n{exc}")
+    except StudyError as exc:
+        print()
+        _report(exc)
         return 5
 
     out = Path("out") / f"{Path(pdf_path).stem}_{chapter}.json"

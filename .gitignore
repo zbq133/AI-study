@@ -7,5 +7,6 @@ settings.json
 settings.json.tmp
 out/
 uploads/
+test pdf/
 *.log
 .vscode/

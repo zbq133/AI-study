@@ -40,10 +40,12 @@
 
 ## 用命令行
 
+    .\.venv\Scripts\python.exe -m app.cli "D:\path\a.pdf"           # 只给 PDF：先看可用章节
     .\.venv\Scripts\python.exe -m app.cli "D:\path\a.pdf" "第3章" 5
     .\.venv\Scripts\python.exe -m app.cli "D:\path\a.pdf" 18 3      # 也可以直接填章节序号
 
-不给章节名时会先打印「可用章节」。列表乱了先调解析器，别急着往下跑。
+只给 PDF 会先打印「可用章节」然后停下，等你填章节名再跑一遍；
+章节名对不上、模型出错都会用人话报错（不再甩 traceback）。
 
 ## 环境变量
 
