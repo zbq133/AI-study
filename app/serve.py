@@ -490,11 +490,18 @@ async def list_lessons(q: str = "", limit: int = 50) -> dict:
     每条带上自己占多大：讲义 JSON + 对应的那份 PDF。清历史时人才知道能省多少。
     """
     rows = _store().list(q, limit=max(1, min(limit, 200)))
+    seen: set = set()
+    total = 0
     for r in rows:
         p = _store().file_of(r["id"])
         r["bytes"] = _size_of(p)
         r["pdf_bytes"] = _size_of(UPLOAD_DIR / f"{Path(str(r.get('doc_id') or '')).name}.pdf")
-    return {"lessons": rows, "total_bytes": sum(r["bytes"] + r["pdf_bytes"] for r in rows)}
+        total += r["bytes"]
+        # 几章共用一个 PDF：合计里只算一次，否则"能腾出多少"会翻好几倍
+        if r["pdf_bytes"] and r["doc_id"] not in seen:
+            seen.add(r["doc_id"])
+            total += r["pdf_bytes"]
+    return {"lessons": rows, "total_bytes": total}
 
 
 def _size_of(p: Path | None) -> int:

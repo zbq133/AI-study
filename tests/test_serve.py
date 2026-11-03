@@ -776,6 +776,20 @@ def test_history_list_says_how_much_space_each_one_takes(doc_pdf, monkeypatch):
     assert data["total_bytes"] == row["bytes"] + row["pdf_bytes"]
 
 
+def test_history_total_counts_a_shared_pdf_once(book_pdf, monkeypatch):
+    """两章共用一份 PDF：合计里它只该出现一次，不然"腾出多少"会虚高好几倍。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        _two_lessons(client, book_pdf)
+        data = client.get("/api/lessons").json()
+    rows = data["lessons"]
+    assert len(rows) == 2
+    assert rows[0]["pdf_bytes"] == rows[1]["pdf_bytes"] > 0     # 同一个 doc_id
+    assert data["total_bytes"] == sum(r["bytes"] for r in rows) + rows[0]["pdf_bytes"]
+
+
 def test_purge_deletes_the_records_the_files_and_the_unused_pdf(book_pdf, monkeypatch):
     """批量删：索引、out 里的 JSON、以及没人再用的上传 PDF 一起清掉。"""
     for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
