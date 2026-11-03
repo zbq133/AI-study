@@ -313,7 +313,6 @@ def _check(self):
 （不 import openai 的具体类，换版本不会连带崩掉）；`describe()` 给前端结构化的 `error_info`。
 
 #### P1-6 能交给别人跑 ✅（2026-11-03 已做）
-
 原来只有 `python -m app.serve`，出了问题全靠翻终端里滚过去的 traceback。
 
 - **`GET /api/health`**：`ok` / `version` / `uptime` / `llm{ready,missing,model}` / `jobs{running,total}` /
@@ -327,6 +326,24 @@ def _check(self):
 - **README 重写**：网页五步流程、命令行、环境变量表、128 条测试、目录结构、六条常见问题
   （扫描件空、公式 OCR 不可信、习题一题都没有、成本上限、端口被占、venv 必须 3.12）。
 - 版本号落在 `app/__init__.py` 的 `__version__`，`/api/health` 直接报出去。
+
+#### P1-7 真模型回归 ✅（2026-11-03 已做）
+
+128 条测试全是假桩，跑得快、不花钱，但它们证明不了"真模型现在还按我们的格式回话"。
+模型侧一改（`response_format` 变了、字段名变了、限流策略变了），假桩全绿而线上全崩。
+
+`tests/test_live.py` 三道闸，默认 skip，`STUDY_LIVE=1` + 配好 key 才跑（两次调用、二三十秒、几毛钱）：
+
+1. **一次 outline 调用**：`llm.json(OUTLINE_SYS, ..., Outline)` 能不能过 pydantic —— 验 key、JSON 模式、字段名。
+2. **一条最短真链路**：造一份 5 行英文 PDF → `extract_ir` → `build_sections` → `build_lesson(n_quiz=1)`，
+   然后**把每一条出处（讲义 + 习题）重新丢回 `verify_refs` 逐字校验**。这条测的是项目的卖点本身：
+   讲义可以写得不好，但不能出现"点回去对不上原文"的引用。
+3. **假 key**：必须抛 `StudyError`（`kind` 是 `llm_auth` / `llm_down` 之类），带 title 和 hint，
+   不能是裸的 `AuthenticationError` 到处乱飞。
+
+踩过的坑：第一版写 `llm.api_key = "假的"` 然后期待失败 —— `api_key` 只在 `__init__` 里用来建 client，
+改属性没用，那次调用拿的还是真 key，测试**假绿**了一次。要拿假 key 就必须重新构造 LLM。
+
 
 ---
 
