@@ -1,3 +1,4 @@
+import re
 import time
 from pathlib import Path
 
@@ -144,6 +145,54 @@ def test_stylesheet_actually_hides_the_hide_class(env):
     rule = re.search(r"\.hide\s*\{([^}]*)\}", css)
     assert rule, "app.css 里没有 .hide 规则"
     assert "display" in rule.group(1) and "none" in rule.group(1), rule.group(1)
+
+
+def test_colors_all_come_from_the_palette(env):
+    """颜色栏要能换皮：主色必须走变量，不能是散落在规则里的字面量。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    assert ":root[data-theme=\"light\"]" in css, "没有浅色主题"
+    body = re.search(r"\nbody\s*\{([^}]*)\}", css)
+    assert body and "var(--bg)" in body.group(1), body.group(0) if body else "没有 body 规则"
+    # 面板/正文/强调色这三样也得是变量，否则改一个还剩一堆写死的
+    for var in ("--panel", "--fg", "--accent"):
+        assert css.count(f"var({var})") >= 2, var
+    # 浅色主题是覆盖变量，不许重复定义规则（那样会越改越乱）
+    light = re.search(r":root\[data-theme=\"light\"\]\s*\{([^}]*)\}", css).group(1)
+    assert "--bg:#f6f7f9" in light.replace(" ", "")
+
+
+def test_source_column_can_be_collapsed(env):
+    """收起原文之后讲义要独占整行；点出处时要先展开再跳。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+    rule = re.search(r"\.cols\.no-src\s*\{([^}]*)\}", css)
+    assert rule, "收起来没有换栅格"
+    # 必须是"目录 + 讲义"两栏，不能偷偷留成三栏（那样讲义也没变大）
+    assert re.search(r"grid-template-columns:\s*200px\s+minmax\(0,\s*1fr\)\s*;", rule.group(1)), rule.group(1)
+    hidden = re.search(r"\.cols\.no-src\s+#source\s*\{([^}]*)\}", css)
+    assert hidden and "none" in hidden.group(1)
+    assert 'id="srcToggle"' in html
+    assert "function setSourceCollapsed" in js
+    # 点出处的时候如果原文栏是收起的，要先展开，否则 scrollIntoView 打在一个 display:none 的块上
+    ref = js.index("e.target.closest('.ref')")
+    assert js.index("srcCollapsed()", ref) < js.index("scrollIntoView", ref)
+
+
+def test_theme_reaches_the_page_before_the_first_paint(env):
+    """主题要在 <head> 里就套上，不然暗色页面会先闪一下白。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+    head = html[:html.index("</head>")]
+    assert "study.theme" in head, "首屏脚本没读主题"
+    assert head.index("study.theme") < html.index("/static/app.js")
+    assert 'id="themeMode"' in html and 'id="customBox"' in html
+    for box in ("cBg", "cPanel", "cFg", "cAccent"):
+        assert f'id="{box}"' in html
+    assert "function applyTheme" in js and "dataset.theme" in js
 
 
 def test_quiz_hides_answers_until_the_student_answers(env):

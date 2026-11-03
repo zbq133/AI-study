@@ -5,6 +5,20 @@
 <title>AI Study</title>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/static/app.css">
+<script>
+/* 先把主题套上再画，否则暗色页面会先闪一下白。逻辑在 app.js，这里只负责"早一步"。 */
+(function () {
+  try {
+    var t = JSON.parse(localStorage.getItem('study.theme') || 'null') || {};
+    if (t.mode) document.documentElement.dataset.theme = t.mode;
+    if (t.mode === 'custom' && t.custom) {
+      Object.keys(t.custom).forEach(function (k) {
+        document.documentElement.style.setProperty(k, t.custom[k]);
+      });
+    }
+  } catch (e) { /* 存坏了就当没设置过 */ }
+})();
+</script>
 </head>
 <body>
 
@@ -37,7 +51,10 @@
     <div id="tocBody" class="pad"></div>
   </aside>
   <section class="col" id="lesson">
-    <div class="colhead">讲义</div>
+    <div class="colhead">讲义
+      <span class="spacer"></span>
+      <button class="ghost" id="srcToggle" title="收起/展开原文">收起原文</button>
+    </div>
     <div id="lessonBody" class="pad">
       <p class="hint">上传课件 → 选一章 → 生成。</p>
     </div>
@@ -94,6 +111,31 @@
         <button id="setSave">保存</button>
         <button class="ghost" id="setTest">测一下模型列表</button>
         <span class="meta" id="setMsg"></span>
+      </div>
+    </div>
+
+    <div class="sect">
+      <div class="secttitle">② 颜色</div>
+
+      <div class="field">
+        <span>主题</span>
+        <div class="seg" id="themeMode">
+          <button type="button" data-mode="dark">深色</button>
+          <button type="button" data-mode="light">浅色</button>
+          <button type="button" data-mode="custom">自定义</button>
+        </div>
+        <em class="src" id="themeNote">换主题立刻生效，存在这台电脑的浏览器里，不用保存。</em>
+      </div>
+
+      <div class="field hide" id="customBox">
+        <span>自己挑四个主色</span>
+        <div class="swatches">
+          <label class="swatch">背景<input type="color" id="cBg"></label>
+          <label class="swatch">面板<input type="color" id="cPanel"></label>
+          <label class="swatch">正文<input type="color" id="cFg"></label>
+          <label class="swatch">强调<input type="color" id="cAccent"></label>
+        </div>
+        <em class="src">背景和面板别选成一样，三栏的边界会看不出来。</em>
       </div>
     </div>
   </div>

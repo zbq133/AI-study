@@ -488,6 +488,7 @@ function renderSource() {
 $('#lesson').addEventListener('click', e => {
   const btn = e.target.closest('.ref');
   if (!btn) return;
+  if (srcCollapsed()) setSourceCollapsed(false);   // 收起来了就先展开，不然跳过去看不见
   const ids = (btn.dataset.ids || '').split(',').filter(Boolean);
   document.querySelectorAll('.blk.hl').forEach(x => x.classList.remove('hl'));
   if (!ids.length) return;
@@ -564,6 +565,7 @@ function paintSettings(payload) {
 
 async function openSettings() {
   $('#setModal').classList.remove('hide');
+  paintTheme();
   $('#setMsg').textContent = '读设置……';
   try {
     paintSettings(await (await fetch('/api/settings')).json());
@@ -629,4 +631,103 @@ $('#setTest').onclick = async () => {
     $('#setMsg').textContent = String(e.message || e);
   }
 };
+
+/* ---------- 颜色 ---------- */
+
+const THEME_KEY = 'study.theme';
+const THEME_VARS = { bg: '--bg', panel: '--panel', fg: '--fg', accent: '--accent' };
+
+function readTheme() {
+  try {
+    return JSON.parse(localStorage.getItem(THEME_KEY) || 'null') || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveTheme(t) {
+  try { localStorage.setItem(THEME_KEY, JSON.stringify(t)); } catch (e) { /* 无痕模式就存不上 */ }
+}
+
+function cssVar(name) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return /^#[0-9a-f]{6}$/i.test(v) ? v : '#000000';
+}
+
+function applyTheme(t) {
+  const root = document.documentElement;
+  Object.values(THEME_VARS).forEach(v => root.style.removeProperty(v));
+  root.dataset.theme = t.mode === 'light' ? 'light' : (t.mode === 'custom' ? (t.base || 'dark') : 'dark');
+  if (t.mode === 'custom') {
+    Object.entries(t.custom || {}).forEach(([k, v]) => root.style.setProperty(k, v));
+  }
+}
+
+function paintTheme() {
+  const t = readTheme();
+  const mode = t.mode || 'dark';
+  $('#themeMode').querySelectorAll('button').forEach(b => {
+    b.classList.toggle('on', b.dataset.mode === mode);
+  });
+  $('#customBox').classList.toggle('hide', mode !== 'custom');
+  const custom = t.custom || {};
+  const pick = (id, name) => { $(id).value = custom[name] || cssVar(THEME_VARS[name]); };
+  pick('#cBg', 'bg');
+  pick('#cPanel', 'panel');
+  pick('#cFg', 'fg');
+  pick('#cAccent', 'accent');
+}
+
+$('#themeMode').addEventListener('click', e => {
+  const b = e.target.closest('button[data-mode]');
+  if (!b) return;
+  const t = readTheme();
+  t.mode = b.dataset.mode;
+  if (t.mode === 'custom' && !t.custom) {
+    t.base = t.base || 'dark';
+    t.custom = {
+      '--bg': cssVar('--bg'), '--panel': cssVar('--panel'),
+      '--fg': cssVar('--fg'), '--accent': cssVar('--accent'),
+    };
+  }
+  saveTheme(t);
+  applyTheme(t);
+  paintTheme();
+});
+
+[['#cBg', 'bg'], ['#cPanel', 'panel'], ['#cFg', 'fg'], ['#cAccent', 'accent']]
+  .forEach(([sel, name]) => {
+    $(sel).addEventListener('input', () => {
+      const t = readTheme();
+      t.mode = 'custom';
+      t.base = t.base || (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+      t.custom = Object.assign({}, t.custom, { [THEME_VARS[name]]: $(sel).value });
+      saveTheme(t);
+      applyTheme(t);
+      paintTheme();
+    });
+  });
+
+applyTheme(readTheme());
+
+/* ---------- 原文栏可折叠 ---------- */
+
+const SRC_KEY = 'study.srcCollapsed';
+
+function srcCollapsed() {
+  return document.querySelector('.cols').classList.contains('no-src');
+}
+
+function setSourceCollapsed(on) {
+  document.querySelector('.cols').classList.toggle('no-src', on);
+  $('#srcToggle').textContent = on ? '展开原文' : '收起原文';
+  try { localStorage.setItem(SRC_KEY, on ? '1' : '0'); } catch (e) { /* 无所谓 */ }
+}
+
+$('#srcToggle').onclick = () => setSourceCollapsed(!srcCollapsed());
+
+try {
+  if (localStorage.getItem(SRC_KEY) === '1') setSourceCollapsed(true);
+} catch (e) { /* 无所谓 */ }
+
 
