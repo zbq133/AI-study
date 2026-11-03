@@ -22,26 +22,34 @@
 
 | 项 | 状态 |
 |---|---|
-| 代码 | `app/` 7 个 Python 模块约 1650 行 + `app/web/` 三个静态文件约 8 KB，`tests/` 72 条测试全绿 |
-| 后端内核 | **约 90%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过 |
-| 外壳 | **约 65%**：CLI + 本地 Web 服务（`app/serve.py`，上传/解析/生成/SSE 进度/静态资源） |
-| 界面 | **约 15%**：一个单页表单 + 进度条 + `<pre>` 结果，能用但不像产品（已拆成 `app/web/`，改起来不再是在 Python 字符串里摸） |
-| 最新 commit | `e1e28a7 feat: 出处记下落在哪几个块和它的矩形` |
+| 代码 | `app/` 12 个 Python 模块 **2164 行** + `app/web/` 四个文件 **1195 行**（另含本地 KaTeX 548 KB）+ `tests/` 11 个文件 **2160 行** |
+| 测试 | **153 passed + 3 skipped**（skip 的三条是真模型回归，`STUDY_LIVE=1` 才跑） |
+| HTTP 端点 | **16 个**（见 §7） |
+| 后端内核 | **约 95%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过；错误分类、取消、成本闸、历史索引都已就位 |
+| 外壳 | **约 90%**：CLI + 本地 Web 服务 + 探活 + 日志 + 一键启动脚本 |
+| 界面 | **约 85%**：三栏（目录 / 讲义 / 原文）、出处高亮联动、习题先做后判、设置界面（模型 / 思考等级 / 颜色）、原文可折叠 |
+| 最新 commit | `1acdcea fix: 浅色主题的灰字压深、设置按钮放大、模型换成能点的下拉` |
+| 提交数 | 34 |
 | 运行环境 | Python **3.12**（3.15 装不上 onnxruntime，见 §4） |
 
-**真跑实测数据**（`12. Summary and recommendations`，15 页双栏综述）：
+**还差什么**（按主人视角的完成度，不是行数）：
+
+- 当"自己这台电脑上能用"：**约 92%**。剩下的是体验细节（见 §9）。
+- 当"能交给别人长期跑"：**约 75%**。缺的是多用户 / 配额 / 反向代理与 HTTPS / 版本升级迁移，这些不是当前目标。
+
+**真跑实测数据**（`12. Summary and recommendations`，15 页双栏综述，最近一次全链路）：
 
 ```
-解析  2.8 秒 → 711 块 / 23 章（原生文字层，没走 OCR）
-生成 45.6 秒 → 13 次模型调用 / 输入 19136 / 输出 6883 tokens
-结果  5 节讲义 · 8 条"能…"学习目标 · 3 道题全部通过独立重解验证
-出处  quote 179 / 192 / 146 字，都是完整英文句子
+解析  4.2 秒 → 680 块 / 23 章（原生文字层，没走 OCR；跨页重复的页眉页脚已摘掉）
+生成 46.1 秒 → 11 次模型调用 / 输入 18962 / 输出 6938 tokens
+结果  5 节讲义 · 8 条"能…"学习目标 · 2 道题全部通过独立重解验证
+出处  36 条 source_refs 全部带 blocks + bbox（缺 bbox 的 0 条）
 ```
 
 跑起来的两种方式：
 
 ```powershell
-# 网页（推荐）
+# 网页（推荐，也可以直接双击 start.ps1）
 .\.venv\Scripts\python.exe -m app.serve        # → http://127.0.0.1:8765
 
 # 命令行
@@ -173,9 +181,13 @@ p.write_bytes(p.read_bytes().replace(b"\r\n", b"\n"))
 
 排序原则：**先补数据、再改界面、最后调质量**。跳过 P0 直接写前端，会写出一堆没有数据可显示的控件。
 
+> **进度总览（2026-11-03）**：P0 三条全绿；P1 九条里八条做完，只剩 P1-4 的「成本折成钱」；
+> P2 四条（PPT quote 太短 / 公式 OCR / 批量 / 导出）一条没动，都在 §6 后半段讨论过。
+> 每条的落地形态都写在标题下面 —— **接手时先确认它是不是已经做了**，别再实现一遍。
+
 ### P0 — 不做就没法继续
 
-#### P0-1 `SourceRef` 补上 bbox（前端高亮的唯一前置）
+#### P0-1 `SourceRef` 补上 bbox（前端高亮的唯一前置）✅（2026-11-03 已做）
 
 **为什么**：`SourceRef` 只有 `page` + `quote`。前端想"点出处跳到原文并高亮那一行"，需要坐标。
 `Block.bbox` 明明有，但 `verify_refs` 校验完就把它丢了 —— 而**校验过程本身已经知道 quote 落在哪几行**。
@@ -254,7 +266,7 @@ no-cache、越界 404、类型不随系统猜测变）；变异四条全部击�
 
 ### P1 — 用起来像个产品
 
-#### P1-1 三栏界面 + 原文高亮联动
+#### P1-1 三栏界面 + 原文高亮联动 ✅（2026-11-03 已做）
 
 **✅ 已完成**（方案 A：文字版原文，不是 pdf.js）。详见 §6.2 / §6.3。
 
@@ -570,16 +582,37 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 ## 7 · 需要的 API 与数据模型改动（清单）
 
+**当前已实现的 16 个端点**（`app/serve.py`，接手时以代码为准）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/` | 单页界面（`app/web/index.html`） |
+| GET | `/static/{name:path}` | 静态资源，**每个响应都带 `cache-control: no-cache`**，MIME 走白名单表 |
+| POST | `/api/docs` | 上传 PDF（≤80 MB，非 .pdf 直接 400） |
+| POST | `/api/docs/{doc_id}/parse` | 解析成 DocIR + 切章；已解析过直接回缓存结果 |
+| GET | `/api/docs/{doc_id}/layout?pages=11,13-15` | 原文按页摊开成 `{page, blocks:[{id,kind,text,level}]}` |
+| POST | `/api/lessons` | 起一个生成任务，返回 `job_id` |
+| GET | `/api/lessons?q=&limit=` | 历史列表（读 `out/index.json`） |
+| GET | `/api/lessons/{lesson_id}` | 单份讲义（记录 + 本体；文件没了 410） |
+| DELETE | `/api/lessons/{lesson_id}` | 删记录连文件一起删 |
+| POST | `/api/jobs/{job_id}/cancel` | 置取消位；生成/解析的下一次心跳就会停 |
+| GET | `/api/jobs/{job_id}` | 任务快照（进度、成本、错误分类、是否可取消） |
+| GET | `/api/jobs/{job_id}/events` | SSE 进度流（0.4 秒一帧） |
+| GET | `/api/config` | 够不够跑（缺哪些环境变量、当前模型） |
+| GET | `/api/settings` | 接入地址 / 是否已存密钥（只回 `sk-…ec75` 这种提示）/ 模型列表 / 思考等级 |
+| POST | `/api/settings` | 改设置（写 `settings.json`，**永不回明文密钥**，改完不用重启） |
+| GET | `/api/health` | 探活：版本、运行时长、任务数、历史数、上限 |
+
 | # | 改动 | 所属 | 破坏性 |
 |---|---|---|---|
 | 0 | `GET /static/{name}` 发 `app/web/` 里的 css/js | ✅ P0-2 已完成 | 新增 |
 | 1 | `SourceRef` 加 `blocks: list[str]`、`bbox` | ✅ P0-1 已完成 | 否（有默认值） |
 | 2 | `_reading_order_ok` → `locate_quote` 返回位置 | ✅ P0-1 已完成 | 内部函数，不影响外部 |
 | 3 | `GET /api/docs/{id}/layout` 返回本章页的 blocks | ✅ P1-1 已完成 | 新增 |
-| 4 | `POST /api/jobs/{id}/cancel` | P1-3 | 新增 |
-| 5 | `GET /api/lessons` 列表 / `GET /api/lessons/{id}` | P0-3 | 新增 |
-| 6 | `on_step` 增加 `stage="verify"` / `"ocr"` | 6.5 | 否 |
-| 7 | `make_quiz(..., on_step=None)` 新参数 | 6.5 | 否（默认 None） |
+| 4 | `POST /api/jobs/{id}/cancel` | ✅ P1-3 已完成 | 新增 |
+| 5 | `GET /api/lessons` 列表 / `GET /api/lessons/{id}` | ✅ P0-3 已完成 | 新增 |
+| 6 | `on_step` 增加 `stage="verify"` / `"ocr"` | 未做（§6.5，进度条再细一档） | 否 |
+| 7 | `make_quiz(..., on_step=None)` 新参数 | 未做（同上） | 否（默认 None） |
 | 8 | `GET /api/settings` / `POST /api/settings` | ✅ P1-8 已完成 | 新增 |
 
 ---
@@ -593,7 +626,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q          # 必须 68 passed（P0-1 完成时）
+.\.venv\Scripts\python.exe -m pytest -q          # 必须 153 passed, 3 skipped
 .\.venv\Scripts\python.exe -m app.serve          # 打开 127.0.0.1:8765 走一遍
 Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去脉
 ```
@@ -616,23 +649,69 @@ Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去�
 
 | 严重度 | 问题 | 位置 | 状态 |
 |---|---|---|---|
-| P0 | ~~`SourceRef` 没有 bbox，前端无法高亮~~ | `app/schema.py:71` | 已做（`blocks` + `bbox`，e1e28a7） |
-| ~~P1~~ | ~~讲义里的 `$公式$` 在界面上原样显示~~ | `app/web/` | 已接本地 KaTeX（离线 vendor） |
+| P0 | ~~`SourceRef` 没有 bbox，前端无法高亮~~ | `app/schema.py` | 已做（`blocks` + `bbox`，e1e28a7） |
+| P1 | ~~讲义里的 `$公式$` 在界面上原样显示~~ | `app/web/` | 已接本地 KaTeX（离线 vendor 548 KB） |
 | P1 | ~~生成不能取消~~ | `app/serve.py` | 已做（`cancel_evt` + 调用前查，P1-3） |
 | P1 | ~~错误只有一句 traceback~~ | `app/errors.py` | 已做（kind + title + hint，P1-5） |
 | P1 | ~~历史记录无索引，重启即丢~~ | `app/store.py` | 已做（`out/index.json`，P0-3） |
-| P1 | 出题阶段（30 秒）进度不动 | `app/pipeline.py:136` | 待做 |
-| P1 | OCR 阶段无页级进度 | `app/ocr.py` | 待做 |
-| P1 | 成本只显示调用次数，没折成钱 | `app/web/app.js` | 待做（P1-4 余下部分） |
-| P2 | PPT 场景 quote 只有 9–15 字 | 校验语义 | 待定方案（P2-1） |
-| P2 | 公式 OCR 错认（`λ`→`入`） | `app/ocr.py` | 待定方案（P2-2） |
-| P2 | `knowledge_point` 可能长到 48 字 | prompt | 待收窄 |
-| P2 | 中文题干配英文原文（读着割裂） | prompt | 待定 |
+| P1 | ~~`.hide` 规则缺失，答案和解析一直摆着~~ | `app/web/app.css` | 已修（2442ed5） |
+| P1 | ~~浅色主题灰字读不清~~ | `app/web/app.css` | 已修（补 7 个角色变量 + 对比度测试） |
+| P1 | **出题阶段（约 30 秒）进度条不动** | `app/pipeline.py` 的 `make_quiz` | 待做：`make_quiz` 没接 `on_step` |
+| P1 | **OCR 阶段没有页级进度** | `app/ocr.py` | 待做：`ocr_page_cached` 可回调页码 |
+| P1 | **成本只显示调用次数，没折成钱** | `app/web/app.js` | 待做（P1-4 余下）：按模型单价表折算，价格要可配置 |
+| P1 | **出处粒度是"段落块"，不是"那一句"** | `app/schema.py` 的 `_merge_bbox` | 待做：把 bbox 细化到行（同一段里多条 ref 现在指向同一个框） |
+| P2 | PPT 场景 quote 只有 9–15 字 | 校验语义 | 待定方案（P2-1：允许跨行拼接并标注） |
+| P2 | 公式 OCR 错认（`λ`→`入`、`ν`→`v`） | `app/ocr.py` | 待定方案（P2-2：公式页单独走模型或多模态） |
+| P2 | 正文里两个孤立 `$` 会被当公式 | `app/web/app.js` 的 `paintMath` | 已知，实测 26 条行内无误伤，先接受 |
+| P2 | `knowledge_point` 可能长到 48 字 | prompt | 待收窄到 30 字以内 |
+| P2 | 中文题干配英文原文（读着割裂） | prompt | 待定：按原文语种出题，或题干跟随讲义语种 |
+| P2 | 思考等级不被模型支持时是静默降级 | `app/llm.py` 的 `_create` | 已记 `reasoning_note`，但**界面还没显示它** |
 
 ---
 
-## 10 · 一句话给接手的人
+## 11 · 接下来做什么（给接手的人排个序）
+
+按"用户能感觉到 / 改动风险 / 依赖关系"三样排的。**别跳着做**，前面几条会改变后面的实现方式。
+
+### 第一优先：把已经有的做得更可信（各 0.5 天）
+
+1. **出题阶段要有进度**（§9 第一条）。现在 5 节讲义写完、进度停在 82%，然后三十秒不动 ——
+   主人会以为卡死了。做法：`make_quiz(llm, lessons, n, page_text, blocks=None, source="", on_step=None)`，
+   内部在"审第 i/n 题"时回调一次；`serve.py` 的 `_do_lesson` 把 82% 到 95% 摊开。
+2. **成本折成钱**（P1-4 余下）。`store.py` 里已记 `prompt_tokens` / `completion_tokens`，
+   加一张 `PRICES = {"deepseek-chat": (输入单价, 输出单价)}`（每百万 token，可从环境变量覆盖），
+   在 `/api/lessons/{id}` 和生成结果里各显示一行「这次大约花了 ¥0.03」。
+   别把价格写死在 JS 里 —— 换模型就错。
+3. **`reasoning_note` 要显示**。`LLM` 在模型不认 `reasoning_effort` 时会静默重发一次并置
+   `reasoning_note`，但 `serve.py` 现在没把它带进 `job.result`。用户选了「高」却毫无变化，会以为坏了。
+
+### 第二优先：让"点回原文"更精确（1 天）
+
+4. **bbox 细化到行**。现在同一段里多条 `source_refs` 指向同一个 `bbox`（段落合并后一段几百字），
+   点不同 chip 高亮的是同一大片。做法：`_locate` 已经返回首尾块下标，再在其中按字符偏移定位到具体行
+   （`Block` 里没存行信息，要么在 `_paragraphs` 合并时留一份行位移表，要么按 `quote` 宽度估）。
+   **注意**：这是这一轮唯一会碰数据模型的地方，改完要把 `tests/test_schema.py` 的 bbox 断言一起更新。
+
+### 第三优先：质量硬骨头（各 1–2 天，要先定方案）
+
+5. **PPT 场景的 quote 太短**（9–15 字，校验很勉强）。两条路：
+   ① 允许跨行/跨块拼接，`SourceRef` 记 `blocks` 列表 + 每段的字偏移，`verify_refs` 校验"拼接后可还原"；
+   ② 给 PPT 单独出「填空/判断」题型，天然不需要长引用。**倾向 ①**，因为它同时修好了教材场景。
+6. **公式 OCR**：`λ`→`入` 这类错误没法靠后处理救。可行方向是「公式块交给多模态模型转 LaTeX」，
+   但会引入新依赖和新成本，做之前先用 30 页真实课件量一遍到底有多少公式页。
+
+### 不建议现在做
+
+- **多用户 / 登录 / 配额**：当前是单人本地工具，加这些会把 150 条测试的假设全部推翻。
+- **换成 React / Vite**：`app/web/` 现在 1200 行，原生 DOM + 事件委托完全够；`python -m app.serve`
+  改一行刷新即见效，引构建链等于给自己加 30 秒的反馈延迟。
+- **把 `out/index.json` 换 sqlite**：几百条记录，整份读写更简单，也没有并发问题。
+
+---
+
+## 12 · 一句话给接手的人
 
 这个项目的价值全在**「每句话都能点回原文」**上。界面怎么美化都在其次，
 只要记住：**任何时候用户在讲义里看到一句判断，都该能在两次点击内看到支撑它的那一行原文。**
 做不到这一点，它就是个会把书读薄的聊天框。
+

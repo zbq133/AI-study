@@ -28,8 +28,15 @@
 3. 填题数 → 生成。进度条走的是真进度（大纲 → 第 n/N 节 → 出题），中途可以点「停」
 4. 讲义里每条「原文 pN」都能点，右边跟着高亮；习题先自己选，点提交才判对错
 5. 左栏「最近生成」存着以前做过的讲义（`out/index.json`），重启服务也还在
+6. 左下角 ⚙ **设置**：接入地址 / 密钥 / 模型（下拉，能真换）/ 思考等级 / 颜色（深色、浅色、自定义）
+
+设置写进项目根的 `settings.json`（已在 `.gitignore`），优先级高于 `.env`；
+界面上永远只回 `sk-…ec75` 这种提示，**不会回明文密钥**。改完不用重启。
 
 服务只监听 `127.0.0.1`，不对外。要给别人用，得自己架在反向代理后面并加鉴权 —— 现在没有登录。
+
+`GET /api/health` 是探活接口（版本、运行时长、任务数、历史数、成本上限），
+日志落在 `out/server.log`（2 MB 轮转，留两份），出问题先看它，别只靠终端里滚过去的报错。
 
 ## 用命令行
 
@@ -49,6 +56,7 @@
 | `LLM_MODEL` | 是 | 例：`deepseek-chat` |
 | `LESSON_MAX_CALLS` | 否 | 一次生成最多调几次模型，默认 `40`；到顶就停并说清楚 |
 | `LESSON_MAX_TOKENS` | 否 | 一次生成最多烧多少 token，默认 `200000` |
+| `LLM_REASONING_EFFORT` | 否 | 思考等级 `low` / `medium` / `high`；模型不认时会自动按默认重发一次 |
 
 上限在**每次调用之前**查，所以停下时不会再多花一次钱。写歪了（不是正整数）退回默认值 ——
 配置错的表现应该是"按默认跑"，不是"起不来"。
@@ -57,8 +65,9 @@
 
     .\.venv\Scripts\python.exe -m pytest -q
 
-128 条，全部离线（模型用假桩）。覆盖解析、章节切分、引用校验、生成管线、Web 端点、前端判分逻辑。
-真模型的回归要手动开：`STUDY_LIVE=1` + 有 key 时 `tests/test_live.py` 才会跑一条最小链路。
+153 条通过 + 3 条跳过，全部离线（模型用假桩）。覆盖解析、章节切分、引用校验、生成管线、
+Web 端点、前端判分逻辑、设置、索引、错误分类、预算与取消。
+真模型的回归要手动开：`STUDY_LIVE=1` + 有 key 时 `tests/test_live.py` 才会跑真实链路（会花钱）。
 
 ## 目录
 
@@ -68,17 +77,19 @@
       schema.py     Block / DocIR / SourceRef / Lesson，章节切分与引用校验
       pipeline.py   大纲 → 逐节讲解 → 出题 → 打乱选项独立重解
       prompts.py    三份系统提示词
-      llm.py        OpenAI 兼容客户端 + 校验失败回灌重试 + 成本闸
+      llm.py        OpenAI 兼容客户端 + 校验失败回灌重试 + 成本闸 + 取消 + 思考等级降级
       errors.py     失败分类：kind / title / hint
+      settings.py   设置优先级 settings.json > 环境变量，永不回明文密钥
       store.py      out/index.json 索引（原子写）
-      serve.py      FastAPI（上传、解析、生成、SSE 进度、历史）
+      serve.py      FastAPI（上传、解析、布局、生成、SSE 进度、历史、设置、探活）
       cli.py        命令行入口
-      web/          三栏界面（原生 DOM，无构建链）+ vendor/katex
-    tests/          128 条
+      web/          三栏界面（原生 DOM，无构建链）+ grade.js + vendor/katex
+    tests/          153 passed + 3 skipped
     docs/
-      ROADMAP.md    现状、硬约束、三阶段计划、已知问题
+      ROADMAP.md    现状、硬约束、完整计划、已知问题、接下来做什么
       DECISIONS.md  为什么这么做（每条都带踩过的坑）
       GEMINI-SETUP.md  用别的模型接手时的环境说明
+    GEMINI.md       接手纪律 + 现状 + 下一棒（Gemini CLI 会自动读）
     out/            成品：讲义 JSON + index.json + server.log（不进仓库）
     uploads/        上传的 PDF（不进仓库）
 
