@@ -1,3 +1,6 @@
+import pytest
+
+from app.errors import ChapterNotFound
 from app.pipeline import (_bullets, _clip, _render_sources, _solve_independently, _squeeze,
                           build_lesson)
 from app.schema import (Block, DocIR, LessonSection, Outline, OutlineItem,
@@ -207,12 +210,13 @@ def test_bullets_stop_at_the_limit():
 
 
 def test_build_lesson_unknown_chapter_raises():
-    try:
+    """章节不存在要报"没找到这一章"这类能给人看的错，不是裸 ValueError。"""
+    with pytest.raises(ChapterNotFound) as ei:
         build_lesson(FakeLLM(), make_ir(), "第9章", n_quiz=1)
-    except ValueError as exc:
-        assert "没找到章节" in str(exc)
-    else:
-        raise AssertionError("应当抛出 ValueError")
+    assert ei.value.kind == "chapter"
+    assert "没找到章节" in str(ei.value)
+    assert ei.value.hint
+
 
 def test_squeeze_keeps_english_spaces_and_drops_cjk_ones():
     assert _squeeze("机械波的传播需\n有传播振动的介质") == "机械波的传播需有传播振动的介质"

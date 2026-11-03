@@ -24,8 +24,9 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from .errors import MissingConfig, describe
 from .llm import LLM
-from .pdf import NoTextLayer, extract_ir, page_block_map
+from .pdf import extract_ir, page_block_map
 from .pipeline import build_lesson
 from .schema import build_sections, is_reference_title
 
@@ -71,6 +72,7 @@ class Job:
         self.message = ""
         self.result: Any = None
         self.error = ""
+        self.error_info: dict = {}          # kind/title/hint/detail，前端照着说人话
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -81,6 +83,7 @@ class Job:
         return {"id": self.id, "kind": self.kind, "label": self.label,
                 "state": self.state, "stage": self.stage, "percent": self.percent,
                 "message": self.message, "error": self.error,
+                "error_info": self.error_info,
                 "elapsed": round((self.t1 or time.time()) - self.t0, 1),
                 "calls": self.calls, "prompt_tokens": self.prompt_tokens,
                 "completion_tokens": self.completion_tokens,
@@ -110,15 +113,10 @@ def _spawn(job: Job, fn, *args) -> None:
             await loop.run_in_executor(_executor, fn, job, *args)
             job.state = "done"
             job.percent = 100
-        except NoTextLayer as exc:
+        except Exception as exc:                    # 兜底：别让异常消失在线程里
             job.state = "failed"
-            job.error = str(exc)
-        except ValueError as exc:
-            job.state = "failed"
-            job.error = str(exc)
-        except Exception as exc:                     # 兜底：别让异常消失在线程里
-            job.state = "failed"
-            job.error = f"{type(exc).__name__}: {exc}"
+            job.error_info = describe(exc)
+            job.error = str(exc) or job.error_info["title"]
         finally:
             job.t1 = time.time()
             if job.state == "done":
@@ -189,7 +187,9 @@ def _safe(name: str) -> str:
 def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
     missing = [k for k in REQUIRED if not os.environ.get(k)]
     if missing:
-        raise ValueError("缺少环境变量：" + ", ".join(missing) + "（在 .env 里填）")
+        raise MissingConfig(
+            "缺少环境变量：" + ", ".join(missing),
+            hint="在项目根目录的 .env 里填上这三个，然后重启服务。")
 
     ir = DOCS[doc_id]["ir"]
     llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"],

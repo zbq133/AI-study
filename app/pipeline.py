@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from .errors import ChapterNotFound
 from .pdf import page_block_map, page_text_map
 from .prompts import (OUTLINE_SYS, OUTLINE_USER, QUIZ_SYS, QUIZ_USER,
                       SECTION_SYS, SECTION_USER, VERIFY_SYS, VERIFY_USER)
@@ -230,7 +231,9 @@ def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None):
     blocks = page_block_map(ir)
     sections = select_chapter(build_sections(ir), chapter)
     if not sections:
-        raise ValueError(f"没找到章节：{chapter}（先看 extract_ir 打印的可用章节）")
+        raise ChapterNotFound(
+            f"没找到章节：{chapter}",
+            hint="重新解析一次看左侧目录，章节名要对得上（也可以直接填序号）。")
 
     step(stage="outline")
     outline = plan_outline(llm, chapter, sections)

@@ -194,6 +194,10 @@ def test_lesson_job_fails_without_env(doc_pdf, monkeypatch):
         snap = _wait(client, r.json()["job_id"])
     assert snap["state"] == "failed"
     assert "缺少环境变量" in snap["error"]
+    # 前端照着 error_info 说人话：kind 认得出、title/hint 都有
+    info = snap["error_info"]
+    assert info["kind"] == "config"
+    assert info["title"] and info["hint"]
 
 
 def test_lesson_job_writes_a_lesson(doc_pdf, monkeypatch):

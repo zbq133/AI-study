@@ -6,6 +6,7 @@ from pathlib import Path
 
 import fitz
 
+from .errors import BadPDF, EmptyDocument
 from .schema import Block, DocIR
 
 HEAD_NUM = re.compile(
@@ -13,7 +14,7 @@ HEAD_NUM = re.compile(
 )
 
 
-class NoTextLayer(RuntimeError):
+class NoTextLayer(EmptyDocument):
     """整份 PDF 提不出任何文字行（扫描件、图片型课件，或文字被做了轮廓化）。
 
     以前这种情况会一路返回空 IR：0 块 → 0 章节 → CLI 打印一张空表还退出 0，
@@ -262,7 +263,10 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr") -> DocIR:
     传 ocr_cache=None 关掉缓存。
     """
     path = Path(path)
-    doc = fitz.open(str(path))
+    try:
+        doc = fitz.open(str(path))
+    except Exception as exc:          # 损坏 / 加密 / 根本不是 PDF
+        raise BadPDF(f"{Path(path).name} 打不开：{exc}") from exc
     doc_id = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
     if ocr_cache:
         ocr_cache = Path(ocr_cache)

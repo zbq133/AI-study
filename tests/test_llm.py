@@ -1,6 +1,7 @@
 import pytest
 from pydantic import BaseModel
 
+from app.errors import LLMBadJSON
 from app.llm import LLM
 
 
@@ -67,8 +68,9 @@ def test_json_retries_after_bad_json():
 
 def test_json_raises_after_retries_exhausted():
     llm = LLM(client=StubClient(["坏"]), model="stub")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(LLMBadJSON) as ei:
         llm.json("s", "u", Payload, retries=1)
+    assert ei.value.kind == "llm_bad_json"
 
 
 def test_repair_prompt_is_appended():

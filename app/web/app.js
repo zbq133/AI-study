@@ -67,6 +67,27 @@ function chips(refs) {
 
 /* ---------------- 进度 ---------------- */
 
+/** 失败要说人话：title 一句话 + hint 怎么办；细节只在认不出来时露出来。 */
+function fail(info, fallback) {
+  const box = $('#err');
+  box.textContent = '';
+  if (!info || !info.title) { box.textContent = fallback || '出错了'; return; }
+  const t = document.createElement('b');
+  t.textContent = info.title;
+  box.appendChild(t);
+  if (info.hint) {
+    const h = document.createElement('span');
+    h.className = 'hintline';
+    h.textContent = info.hint;
+    box.appendChild(h);
+  }
+  if (info.detail && info.kind === 'unknown') {
+    const d = document.createElement('code');
+    d.textContent = info.detail;
+    box.appendChild(d);
+  }
+}
+
 function stageView(bar, stageEl, detailEl, snap) {
   bar.style.width = (snap.percent || 0) + '%';
   stageEl.textContent = snap.stage + (snap.state === 'running' ? '…' : '');
@@ -109,7 +130,7 @@ $('#up').onclick = async () => {
       snap: s => stageView($('#pBar'), $('#stage'), $('#detail'), s),
       end: s => {
         if (s.state === 'failed') {
-          $('#err').textContent = s.error; $('#up').disabled = false;
+          fail(s.error_info, s.error); $('#up').disabled = false;
           $('#lessonBody').innerHTML = '<p class="hint">解析失败。</p>';
           return;
         }
@@ -215,7 +236,7 @@ $('#go').onclick = async () => {
     },
     end: s => {
       $('#go').disabled = false; $('#up').disabled = false;
-      if (s.state === 'failed') { $('#err').textContent = s.error; return; }
+      if (s.state === 'failed') { fail(s.error_info, s.error); return; }
       lesson = s.result.lesson || {};
       $('#goMeta').textContent = `${s.result.sections || 0} 节 · ${s.result.quiz || 0} 题 · ${s.elapsed}s`;
       renderLesson(lesson);

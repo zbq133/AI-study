@@ -5,6 +5,8 @@ import json
 from openai import OpenAI
 from pydantic import ValidationError
 
+from .errors import LLMBadJSON, wrap_llm_error
+
 
 class LLM:
     def __init__(self, base_url="", api_key="", model="", timeout=240.0, client=None):
@@ -20,9 +22,12 @@ class LLM:
                 {"role": "user", "content": user}]
         last = None
         for _ in range(retries + 1):
-            resp = self.client.chat.completions.create(
-                model=self.model, messages=msgs, temperature=temperature,
-                response_format={"type": "json_object"})
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model, messages=msgs, temperature=temperature,
+                    response_format={"type": "json_object"})
+            except Exception as exc:   # 鉴权/限流/超时/网络，全收敛成人话
+                raise wrap_llm_error(exc) from exc
             self.calls += 1
             usage = getattr(resp, "usage", None)
             if usage is not None:
@@ -36,4 +41,4 @@ class LLM:
                 msgs.append({"role": "assistant", "content": txt})
                 msgs.append({"role": "user",
                              "content": f"上面的 JSON 未通过校验：{exc}\n只输出修正后的完整 JSON，不要任何解释。"})
-        raise RuntimeError(f"JSON 连续校验失败：{last}")
+        raise LLMBadJSON(f"JSON 连续校验失败：{last}")
