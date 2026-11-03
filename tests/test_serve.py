@@ -258,3 +258,37 @@ def test_layout_rejects_a_silly_page_spec(env, doc_pdf):
         huge = client.get(f"/api/docs/{doc_id}/layout?pages=1-9999")
     assert bad.status_code == 400
     assert huge.status_code == 400
+
+def test_vendor_assets_reach_a_subdirectory():
+    """vendor/katex 在子目录里，/{name} 那种写法够不到它。"""
+    with TestClient(serve.app) as client:
+        r = client.get("/static/vendor/katex/katex.min.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript")
+    assert len(r.content) > 100000
+
+
+def test_katex_fonts_are_served_as_woff2():
+    """字体 MIME 写错浏览器会拒用，公式就变成一排方框。"""
+    with TestClient(serve.app) as client:
+        r = client.get("/static/vendor/katex/fonts/KaTeX_Main-Regular.woff2")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "font/woff2"
+    assert r.content[:4] == b"wOF2"
+
+
+def test_index_loads_katex_and_the_grader_before_app_js():
+    """三个脚本的顺序是硬要求：KaTeX 先于 app.js，判分模块也先于 app.js。"""
+    html = (serve.WEB_DIR / "index.html").read_text(encoding="utf-8")
+    css = html.index("vendor/katex/katex.min.css")
+    katex = html.index("vendor/katex/katex.min.js")
+    grader = html.index("/static/grade.js")
+    appjs = html.index("/static/app.js")
+    assert css < katex < appjs
+    assert katex < grader < appjs
+
+
+def test_static_cannot_escape_through_a_subpath():
+    with TestClient(serve.app) as client:
+        r = client.get("/static/vendor/..%2F..%2Fserve.py")
+    assert r.status_code == 404

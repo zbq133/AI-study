@@ -78,9 +78,45 @@ button.ghost { background: transparent; border-color: #2c3541; color: #9aa6b2; }
 /* 习题 */
 .quiz { margin-top: 26px; border-top: 1px solid #1e252f; padding-top: 16px; }
 .q { margin-bottom: 18px; }
-.q .stem { font-weight: 500; margin-bottom: 4px; }
-.q .opt { color: #9aa6b2; font-size: 13.5px; padding-left: 18px; }
+.q .stem { font-weight: 500; margin-bottom: 8px; }
+.hint.sm { font-size: 12px; margin: -2px 0 6px; }
+
+.opts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.opt { display: block; width: 100%; text-align: left; padding: 7px 12px;
+       border: 1px solid #232c37; background: #131a22; color: #9aa6b2;
+       font-size: 13.5px; line-height: 1.55; border-radius: 7px; cursor: pointer; }
+.opt b { color: #7c8794; margin-right: 6px; font-weight: 600; }
+.opt:hover:not(:disabled) { border-color: #2f4a63; color: #d7dde5; }
+.opt.on { border-color: #3f8fd6; background: #16232f; color: #dcebf9; }
+.opt.on b { color: #6fb3e8; }
+.opt.right { border-color: #3d8a5c; background: #16241c; color: #d8f0e2; }
+.opt.right b { color: #5fb87a; }
+.opt.wrong { border-color: #8a3d3d; background: #241818; color: #e5c9c9; }
+.opt.wrong b { color: #e06c75; }
+.opt:disabled { cursor: default; opacity: 1; }
+
+.fillrow { margin-bottom: 10px; }
+.fillin { width: 100%; max-width: 420px; padding: 7px 10px; border-radius: 7px;
+          border: 1px solid #2c3541; background: #0f1419; color: #d7dde5;
+          font-size: 13.5px; }
+.fillin:focus { outline: none; border-color: #3f8fd6; }
+
+.qbar { display: flex; align-items: center; gap: 8px; }
+.qbar button { padding: 4px 12px; font-size: 12.5px; }
+.qres { font-size: 12.5px; color: #7c8794; }
+.qres.ok { color: #5fb87a; }
+.qres.no { color: #e06c75; }
+.qres.warn { color: #c9a227; }
+
+.qans { margin-top: 10px; padding: 10px 12px; border-radius: 7px;
+        background: #131a22; border: 1px solid #1e252f; }
+.qans .cans { color: #5fb87a; font-size: 13px; font-weight: 500; }
+.qans .expl { color: #93a0ad; font-size: 13px; margin-top: 6px; }
 .q .ans { color: #5fb87a; font-size: 13px; margin-top: 4px; }
+
+/* 公式：KaTeX 出来的块别把行高顶太开 */
+.katex-display { margin: 10px 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.katex { font-size: 1.02em; }
 
 /* 原文 */
 .pg { margin-bottom: 22px; }

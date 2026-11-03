@@ -35,6 +35,27 @@ function md(text) {
   return out.join('');
 }
 
+/* ---------------- 公式：交给本地 KaTeX ---------------- */
+/* 只处理 $…$ / $$…$$ / \(…\) / \[…\]，其它语法一概不认；出错就原样留着，
+   宁可看见一行 LaTeX 源码，也不能因为一个公式把整段讲义的渲染搞崩。 */
+
+function paintMath(el) {
+  if (!el || typeof renderMathInElement !== 'function') return;
+  try {
+    renderMathInElement(el, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false }
+      ],
+      throwOnError: false,
+      errorColor: '#d08a8a',
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+    });
+  } catch (e) { console.warn('公式渲染失败', e); }
+}
+
 /* ---------------- 出处 chip ---------------- */
 
 function chips(refs) {
@@ -223,23 +244,130 @@ function renderLesson(L) {
     parts.push(chips(s.source_refs));
     parts.push('</div>');
   });
-  if (L.quiz && L.quiz.length) {
-    const q = ['<div class="quiz"><h3>习题（答案已独立重解验证）</h3>'];
-    L.quiz.forEach((it, i) => {
-      q.push(`<div class="q"><div class="stem">${i + 1}. ${esc(it.stem)}</div>`);
-      (it.options || []).forEach((o, j) =>
-        q.push(`<div class="opt">${String.fromCharCode(65 + j)}. ${esc(o)}</div>`));
-      q.push(`<div class="ans">答案 ${esc(it.answer)}</div>`);
-      q.push(chips(it.source_ref ? [it.source_ref] : []));
-      q.push('</div>');
-    });
-    q.push('</div>');
-    parts.push(q.join(''));
-  }
+  if (L.quiz && L.quiz.length) parts.push(renderQuiz(L.quiz));
   if (!parts.length) parts.push('<p class="hint">这次没有生成出内容。</p>');
   $('#lessonBody').innerHTML = parts.join('');
+  paintMath($('#lessonBody'));
   $('#lessonBody').scrollTop = 0;
 }
+
+/* ---------------- 习题：先自己做，再判分 ---------------- */
+
+function renderQuiz(items) {
+  const out = ['<div class="quiz"><h3>习题</h3>' +
+               '<p class="hint">先自己选（可多选会标出来），点「提交」才看得到对错。</p>'];
+  items.forEach((it, i) => {
+    const type = it.type || 'single';
+    out.push(`<div class="q" data-i="${i}" data-type="${esc(type)}" data-picked="">`);
+    out.push(`<div class="stem">${i + 1}. ${esc(it.stem)}</div>`);
+    if (type === 'fill') {
+      out.push('<div class="fillrow"><input class="fillin" type="text" ' +
+               'placeholder="把答案写在这里" autocomplete="off"></div>');
+    } else {
+      out.push('<div class="opts">' + (it.options || []).map((o, j) => {
+        const k = String.fromCharCode(65 + j);
+        return `<button class="opt" data-k="${k}">` +
+               `<b>${k}</b> ${esc(o)}</button>`;
+      }).join('') + '</div>');
+      if (type === 'multi') out.push('<div class="hint sm">这题是多选</div>');
+    }
+    out.push('<div class="qbar"><button class="qgo">提交</button>' +
+             '<button class="qshow ghost">看答案</button>' +
+             '<button class="qreset ghost hide">再做一次</button>' +
+             '<span class="qres"></span></div>');
+    out.push('<div class="qans hide"><div class="cans"></div>' +
+             (it.explanation ? `<div class="expl">${esc(it.explanation)}</div>` : '') +
+             chips(it.source_ref ? [it.source_ref] : []) + '</div>');
+    out.push('</div>');
+  });
+  out.push('</div>');
+  return out.join('');
+}
+
+function qItem(q) {
+  const i = Number(q.dataset.i);
+  return (lesson && lesson.quiz && lesson.quiz[i]) || null;
+}
+
+function pickedOf(q) {
+  return [...q.querySelectorAll('.opt.on')].map(b => b.dataset.k).join('');
+}
+
+function lockQuestion(q, on) {
+  q.dataset.locked = on ? '1' : '';
+  q.querySelectorAll('.opt').forEach(b => { b.disabled = on; });
+  const fill = q.querySelector('.fillin');
+  if (fill) fill.disabled = on;
+  q.querySelector('.qgo').classList.toggle('hide', on);
+  q.querySelector('.qshow').classList.toggle('hide', on);
+  q.querySelector('.qreset').classList.toggle('hide', !on);
+}
+
+function revealAnswer(q, it, res) {
+  q.querySelector('.qans').classList.remove('hide');
+  const want = String(it.answer == null ? '' : it.answer);
+  let line = `答案 ${esc(want)}`;
+  if (it.type === 'fill') line = `参考答案：${esc(want)}`;
+  const cans = q.querySelector('.cans');
+  cans.innerHTML = line;
+  if (res && !res.reason) {
+    const dom = q.querySelector('.qres');
+    dom.textContent = res.ok ? '对了' : '不对';
+    dom.className = 'qres ' + (res.ok ? 'ok' : 'no');
+  }
+}
+
+$('#lesson').addEventListener('click', e => {
+  const q = e.target.closest('.q');
+  if (!q) return;
+  const it = qItem(q);
+  if (!it) return;
+
+  const opt = e.target.closest('.opt');
+  if (opt && q.dataset.locked !== '1') {
+    const multi = (q.dataset.type || 'single') === 'multi';
+    if (multi) opt.classList.toggle('on');
+    else {
+      q.querySelectorAll('.opt').forEach(b => b.classList.toggle('on', b === opt));
+    }
+    q.dataset.picked = pickedOf(q);
+    return;
+  }
+
+  if (e.target.closest('.qgo')) {
+    const typed = (q.querySelector('.fillin') || {}).value || '';
+    const res = Grade.grade(it, pickedOf(q), typed);
+    if (res.reason === 'empty') {
+      const dom = q.querySelector('.qres');
+      dom.textContent = it.type === 'fill' ? '先写点什么' : '先选一个';
+      dom.className = 'qres warn';
+      return;
+    }
+    const want = Grade.normLetters(it.answer);
+    q.querySelectorAll('.opt').forEach(b => {
+      const k = b.dataset.k;
+      b.classList.remove('on');
+      if (want.indexOf(k) >= 0) b.classList.add('right');
+      else if (res.ok === false && q.dataset.picked.indexOf(k) >= 0) b.classList.add('wrong');
+    });
+    revealAnswer(q, it, res);
+    lockQuestion(q, true);
+    return;
+  }
+
+  if (e.target.closest('.qshow')) { revealAnswer(q, it, null); lockQuestion(q, true); return; }
+
+  if (e.target.closest('.qreset')) {
+    q.dataset.picked = '';
+    q.querySelectorAll('.opt').forEach(b => { b.classList.remove('on', 'right', 'wrong'); });
+    const fill = q.querySelector('.fillin');
+    if (fill) fill.value = '';
+    q.querySelector('.qans').classList.add('hide');
+    q.querySelector('.qres').textContent = '';
+    q.querySelector('.qres').className = 'qres';
+    lockQuestion(q, false);
+  }
+});
 
 /* ---------------- 原文 + 高亮 ---------------- */
 

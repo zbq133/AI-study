@@ -43,7 +43,8 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 #: 表现是"页面出来了但按钮全不响应"。写死一张表，换机器也一样。
 WEB_TYPES = {".css": "text/css; charset=utf-8",
              ".js": "text/javascript; charset=utf-8",
-             ".html": "text/html; charset=utf-8"}
+             ".html": "text/html; charset=utf-8",
+             ".woff2": "font/woff2"}
 MAX_UPLOAD = 80 * 1024 * 1024
 REQUIRED = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
 
@@ -235,7 +236,7 @@ async def index() -> FileResponse:
                         headers={"cache-control": "no-cache"})
 
 
-@app.get("/static/{name}")
+@app.get("/static/{name:path}")
 async def static_file(name: str) -> FileResponse:
     """只发 app/web/ 里的文件。
 
