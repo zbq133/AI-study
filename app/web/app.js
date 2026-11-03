@@ -887,15 +887,18 @@ function cssVar(name) {
 function applyTheme(t) {
   const root = document.documentElement;
   Object.values(THEME_VARS).forEach(v => root.style.removeProperty(v));
-  root.dataset.theme = t.mode === 'light' ? 'light' : (t.mode === 'custom' ? (t.base || 'dark') : 'dark');
-  if (t.mode === 'custom') {
+  /* 默认值只能有一处（这里），paintTheme 与首屏脚本都跟着它走；
+     否则"没设过"会在三个地方各推一次，最后谁赢看不出来。 */
+  const mode = t.mode || 'light';
+  root.dataset.theme = mode === 'custom' ? (t.base || 'light') : mode;
+  if (mode === 'custom') {
     Object.entries(t.custom || {}).forEach(([k, v]) => root.style.setProperty(k, v));
   }
 }
 
 function paintTheme() {
   const t = readTheme();
-  const mode = t.mode || 'dark';
+  const mode = t.mode || 'light';        // 没设过就是浅色（默认浅色界面）
   $('#themeMode').querySelectorAll('button').forEach(b => {
     b.classList.toggle('on', b.dataset.mode === mode);
   });

@@ -270,14 +270,41 @@ def test_left_column_rows_are_tall_enough_to_hit(env):
     """左栏每条太扁：6px 上下内边距 + 12.5px 字，滚着看像一坨。"""
     with TestClient(serve.app) as client:
         css = client.get("/static/app.css").text
-    for sel, minimum in ((".hist-item", 9), (".toc-item", 9)):
+    for sel, minimum in ((".hist-item", 10), (".toc-item", 10)):
         rule = re.search(sel.replace(".", r"\.") + r"\s*\{([^}]*)\}", css)
         assert rule, f"{sel} 规则没了"
         body = rule.group(1)
         pad = re.search(r"padding:\s*(\d+)px\s+\d+px", body)
         assert pad and int(pad.group(1)) >= minimum, f"{sel} 上下内边距只有 {pad and pad.group(1)}px"
         size = re.search(r"font-size:\s*([\d.]+)px", body)
-        assert size and float(size.group(1)) >= 13, f"{sel} 字号只有 {size and size.group(1)}px"
+        assert size and float(size.group(1)) >= 14, f"{sel} 字号只有 {size and size.group(1)}px"
+
+
+def test_history_rows_are_separated_by_a_hairline(env):
+    """几条同名条目挨在一起会糊成一坨，中间得有一条细线。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    for sel in (".hist-item", ".toc-item"):
+        rule = re.search(re.escape(sel) + r"\s*\+\s*" + re.escape(sel) + r"\s*\{([^}]*)\}", css)
+        assert rule, f"{sel} 之间没有分隔线"
+        assert re.search(r"border-top:\s*1px\s+solid", rule.group(1)), rule.group(1)
+
+
+def test_default_theme_is_light(env):
+    """没设置过颜色时默认浅色 —— 首屏（head 内联脚本）和设置面板两处都别各说各的。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+    head = html[html.index("study.theme"):html.index("</script>")]
+    assert re.search(r"t\.mode\s*\|\|\s*'light'", head), "首屏脚本没把默认值设成浅色"
+    assert re.search(r"t\.mode\s*\|\|\s*'light'", js), "设置面板没把默认值设成浅色"
+    assert not re.search(r"t\.mode\s*\|\|\s*'dark'", js + head), "还有地方把默认当成深色"
+    # applyTheme 是真正写 documentElement 的地方：它自己的兜底也必须是浅色，
+    # 否则 readTheme() 返回 {} 时又把页面刷回深色（改过一版就是这么翻车的）
+    body = js[js.index("function applyTheme"):js.index("function paintTheme")]
+    assert re.search(r"const mode = t\.mode \|\| 'light'", body), "applyTheme 的兜底不是浅色"
+    assert "dataset.theme = mode === 'custom' ? (t.base || 'light') : mode" in body.replace("\n", " ") \
+        or re.search(r"dataset\.theme\s*=\s*mode === 'custom' \? \(t\.base \|\| 'light'\) : mode", body), body
 
 
 def test_buttons_spring_back_when_pressed(env):

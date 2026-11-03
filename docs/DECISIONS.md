@@ -424,3 +424,18 @@ devnull（让 `.isatty()` 调得动），`uvicorn.Config(log_config=None)` 让�
 **4. 断言要盯"值"不是"存在"**：第一版测 `reduced` 那段只写了 `"transform: none" in css`
 （从 media query 位置切到文件尾），结果把 `transform: none` 那行删掉，测试照样绿 ——
 因为切出来的尾巴里还有别的匹配。改成截到 `\n}` 为止的块再断言，才真正杀掉这条变异。
+## 2026-11-03 补记：默认浅色、条目之间加细线、字号再大一档
+
+**1. 默认主题改成浅色**，但"默认值"只能写一处。改的时候踩了自己一跤：`paintTheme()` 改成了
+`t.mode || 'light'`，`applyTheme()` 的三元表达式尾巴还留着 `: 'dark'` —— `readTheme()` 返回 `{}`
+时后者把页面又刷回深色，截图看着黑白颠倒。现在 `applyTheme()` 里先 `const mode = t.mode || 'light'`，
+后面只按 `mode` 分支；首屏那段内联脚本也照同一套写。测试盯的是**三处**（head 内联、paintTheme、
+applyTheme）都必须是 `'light'`，且不许再出现 `t.mode || 'dark'`。
+
+**2. 条目之间一条细线**：`.hist-item + .hist-item { border-top: 1px solid var(--line) }`，
+目录同理。几条同名「第十章」挨在一起时，纯靠间距分不清是五行还是三行。
+
+**3. 字号 13 → 14px**（历史条目、目录条目），`.when`（「3 题 · 1.3 MB」）12px，列头 12.5px。
+行距和留白跟着上调：`.hist-item` `padding: 11px 14px`、`.toc-item` `12px 14px`。
+
+**4. 深色用户不会被强制改成浅色**：只在"没有存过"时用浅色；设置里点过「深色」就一直是深色。
