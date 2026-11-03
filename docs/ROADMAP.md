@@ -312,6 +312,22 @@ def _check(self):
 `wrap_llm_error` 按**类名**和 `status_code` 两道判据把 openai 的一堆异常收敛成 auth/quota/timeout/down 四种
 （不 import openai 的具体类，换版本不会连带崩掉）；`describe()` 给前端结构化的 `error_info`。
 
+#### P1-6 能交给别人跑 ✅（2026-11-03 已做）
+
+原来只有 `python -m app.serve`，出了问题全靠翻终端里滚过去的 traceback。
+
+- **`GET /api/health`**：`ok` / `version` / `uptime` / `llm{ready,missing,model}` / `jobs{running,total}` /
+  `docs` / `lessons` / `limits{max_calls,max_tokens}`。**故意不读 PDF、不碰模型** —— 探活接口要便宜到能每秒打一次。
+  索引坏了 `lessons` 记 `-1`，但 `ok` 仍是 `true`：探活不该因为缓存文件坏了变红。
+- **日志落盘**：`setup_logging()` 把 `logging` 挂到 `out/server.log`（`RotatingFileHandler`，2 MB × 2 份），
+  请求级中间件记 `方法 路径 -> 状态 耗时`；4xx/5xx 记 WARNING，静态资源和 SSE 心跳不记（太吵）。
+  只在 `main()` 里挂 —— 测试 import 模块不该在磁盘上留文件。重复调用幂等。
+- **`start.ps1` / `start.sh`**：先查 `.venv` 在不在、`.env` 在不在、8765 被谁占着，然后才起服务。
+  报错要说清楚下一步做什么，不是抛一段 traceback 让用户猜。
+- **README 重写**：网页五步流程、命令行、环境变量表、128 条测试、目录结构、六条常见问题
+  （扫描件空、公式 OCR 不可信、习题一题都没有、成本上限、端口被占、venv 必须 3.12）。
+- 版本号落在 `app/__init__.py` 的 `__version__`，`/api/health` 直接报出去。
+
 ---
 
 ### P2 — 质量

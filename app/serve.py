@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import json
+import logging
+import logging.handlers
 import os
 import threading
 import time
@@ -25,6 +26,7 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from . import __version__
 from .errors import MissingConfig, describe
 from .llm import LLM
 from .pdf import extract_ir, page_block_map
@@ -33,6 +35,11 @@ from .store import Store, make_id
 from .schema import build_sections, is_reference_title
 
 load_dotenv()
+
+log = logging.getLogger("study")
+
+#: 服务起来的时刻，/api/health 用它算 uptime。
+STARTED = time.time()
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -265,6 +272,41 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
 app = FastAPI(title="AI Study", docs_url=None, redoc_url=None, openapi_url=None)
 
 
+def setup_logging(out_dir: Path = OUT_DIR) -> Path:
+    """把日志落到 out/server.log，单文件 2 MB 滚两个备份。
+
+    只挂一次（重复调用不会重复加 handler），返回日志文件路径。
+    放在这里而不是 import 时执行 —— 测试 import 这个模块不该在磁盘上留文件。
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / "server.log"
+    for h in log.handlers:
+        if isinstance(h, logging.FileHandler) and Path(h.baseFilename) == target.resolve():
+            return target
+    h = logging.handlers.RotatingFileHandler(
+        target, maxBytes=2 * 1024 * 1024, backupCount=2, encoding="utf-8")
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    return target
+
+
+@app.middleware("http")
+async def _log_requests(request, call_next):
+    t0 = time.time()
+    response = await call_next(request)
+    path = request.url.path
+    # 静态资源和 SSE 心跳太吵，只在出错时记。
+    if not path.startswith("/static/") and response.status_code >= 400:
+        log.warning("%s %s -> %s %.2fs", request.method, path,
+                    response.status_code, time.time() - t0)
+    elif not path.startswith(("/static/", "/api/jobs/")):
+        log.info("%s %s -> %s %.2fs", request.method, path,
+                 response.status_code, time.time() - t0)
+    return response
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html",
@@ -449,9 +491,36 @@ async def config() -> dict:
             "model": os.environ.get("LLM_MODEL", "")}
 
 
+@app.get("/api/health")
+async def health() -> dict:
+    """给脚本和监控看的：服务活着吗、key 配了没、现在几份任务在跑。
+
+    故意不读 PDF、不碰模型 —— 探活接口必须便宜到可以每秒打一次。
+    """
+    missing = [k for k in REQUIRED if not os.environ.get(k)]
+    running = sum(1 for j in JOBS.values() if j.state in ("queued", "running"))
+    try:
+        lessons = len(_store().list(limit=10_000))
+    except OSError:
+        lessons = -1          # 索引读不了不该让探活变红
+    return {"ok": True,
+            "version": __version__,
+            "uptime": round(time.time() - STARTED, 1),
+            "llm": {"ready": not missing, "missing": missing,
+                    "model": os.environ.get("LLM_MODEL", "")},
+            "jobs": {"running": running, "total": len(JOBS)},
+            "docs": len(DOCS),
+            "lessons": lessons,
+            "limits": {"max_calls": _limit("LESSON_MAX_CALLS", DEFAULT_MAX_CALLS),
+                       "max_tokens": _limit("LESSON_MAX_TOKENS", DEFAULT_MAX_TOKENS)}}
+
+
 def main() -> None:
     import uvicorn
+    setup_logging()
+    log.info("服务起来：http://%s:%s，版本 %s", HOST, PORT, __version__)
     print(f"AI Study 服务：http://{HOST}:{PORT}")
+    print(f"日志：{(OUT_DIR / 'server.log').resolve()}")
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
 
 

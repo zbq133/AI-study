@@ -444,3 +444,65 @@ def test_lesson_whose_file_vanished_says_410(env):
         serve._store().put({"id": "gone", "chapter": "第一章", "file": "gone.json"})
         r = client.get("/api/lessons/gone")
     assert r.status_code == 410
+
+
+# ---------------------------------------------------------------- 探活与日志
+
+def test_health_says_whether_the_key_is_configured(env, monkeypatch):
+    for k in serve.REQUIRED:
+        monkeypatch.delenv(k, raising=False)
+    with TestClient(serve.app) as client:
+        h = client.get("/api/health").json()
+    assert h["ok"] is True
+    assert h["llm"]["ready"] is False
+    assert set(h["llm"]["missing"]) == set(serve.REQUIRED)
+    assert h["version"] == serve.__version__
+    assert h["uptime"] >= 0
+
+
+def test_health_sees_the_key_and_the_limits(env, monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "http://x")
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("LESSON_MAX_CALLS", "7")
+    with TestClient(serve.app) as client:
+        h = client.get("/api/health").json()
+    assert h["llm"]["ready"] is True
+    assert h["llm"]["model"] == "m"
+    assert h["limits"]["max_calls"] == 7
+
+
+def test_health_counts_jobs_and_lessons(env):
+    with TestClient(serve.app) as client:
+        serve._store().put({"id": "a", "chapter": "第一章", "file": "a.json"})
+        serve._store().put({"id": "b", "chapter": "第二章", "file": "b.json"})
+        h = client.get("/api/health").json()
+    assert h["lessons"] == 2
+    assert h["jobs"] == {"running": 0, "total": 0}
+    assert h["docs"] == 0
+
+
+def test_health_survives_a_broken_index(env):
+    (env / "out").mkdir(parents=True, exist_ok=True)
+    (env / "out" / "index.json").write_text("{ 这不是 json", encoding="utf-8")
+    with TestClient(serve.app) as client:
+        h = client.get("/api/health").json()
+    assert h["ok"] is True and h["lessons"] == 0
+
+
+def test_logging_goes_to_a_file_in_the_out_dir(tmp_path):
+    import logging
+    logfile = serve.setup_logging(tmp_path)
+    added = [h for h in serve.log.handlers if isinstance(h, logging.FileHandler)]
+    try:
+        serve.log.info("打个卡 %s", "ok")
+        for h in added:
+            h.flush()
+        assert "打个卡 ok" in logfile.read_text(encoding="utf-8")
+        assert serve.setup_logging(tmp_path) == logfile          # 幂等
+        assert len([h for h in serve.log.handlers
+                    if isinstance(h, logging.FileHandler)]) == len(added)
+    finally:
+        for h in added:
+            serve.log.removeHandler(h)
+            h.close()
