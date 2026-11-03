@@ -1,5 +1,6 @@
 from app.schema import (Block, DocIR, SourceRef, build_sections, extract_answer,
-                        is_reference_title, normalize, select_chapter, verify_refs)
+                        is_reference_title, locate_quote, normalize, select_chapter,
+                        verify_refs)
 
 
 def test_is_reference_title_matches_common_spellings():
@@ -122,3 +123,41 @@ def test_extract_answer_rejects_out_of_range_letter():
     assert extract_answer("E", 4) == ""
     assert extract_answer("", 4) == ""
     assert extract_answer("C", 4) == "C"
+
+def test_verify_refs_records_which_blocks_the_quote_covers():
+    """校验通过后要把"落在哪几块、占多大一块地方"写回 ref。
+
+    前端点"出处"要高亮原文那一行，只有 page + quote 做不到：同一页几十行里
+    光凭一串文字根本找不着位置。
+    """
+    blocks = [_line("b1", "这是一句正常换行的话", 100.0),
+              _line("b2", "从上一行接着写下来", 114.0)]
+    page_text = {1: "这是一句正常换行的话\n从上一行接着写下来\n"}
+    kept = verify_refs([SourceRef(page=1, quote="正常换行的话从上一行接着写")],
+                       page_text, {1: blocks})
+    assert kept[0].blocks == ["b1", "b2"]
+    assert kept[0].bbox == (60.0, 100.0, 300.0, 128.0)
+
+
+def test_verify_refs_keeps_only_the_blocks_actually_hit():
+    """只盖住一块的 quote，不能把整页都算进去。"""
+    blocks = [_line("b1", "第一句完全无关的话", 100.0),
+              _line("b2", "第二句才是要引用的内容", 114.0),
+              _line("b3", "第三句又无关了", 128.0)]
+    page_text = {1: "\n".join(b.text for b in blocks) + "\n"}
+    kept = verify_refs([SourceRef(page=1, quote="第二句才是要引用的内容")],
+                       page_text, {1: blocks})
+    assert kept[0].blocks == ["b2"]
+    assert kept[0].bbox == (60.0, 114.0, 300.0, 128.0)
+
+
+def test_locate_quote_rejects_a_stitch_across_columns():
+    """跨栏拼接定位不到，返回空列表 —— 调用方据此丢弃这条出处。"""
+    blocks = [_line("b1", "左栏最后一句在这里结束", 700.0),
+              _line("b2", "右栏开头是另一段内容", 60.0)]
+    assert locate_quote("左栏最后一句在这里结束右栏开头是另一段内容", blocks) == []
+
+
+def test_locate_quote_returns_empty_when_quote_is_absent():
+    blocks = [_line("b1", "这里只有这一句", 100.0)]
+    assert locate_quote("原文里根本没有的话", blocks) == []

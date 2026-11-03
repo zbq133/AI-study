@@ -71,6 +71,11 @@ class Section(BaseModel):
 class SourceRef(BaseModel):
     page: int
     quote: str
+    #: quote 落在哪几个块上（记 Block.id）。前端点"出处"要能把原文那一行高亮
+    #: 出来，只给页码 + 一串纯文本做不到 —— 得知道是哪几块。
+    blocks: list[str] = []
+    #: 这几块并起来的矩形（PDF 坐标，单位 pt）。没有原始 PDF 也能画出位置。
+    bbox: Optional[tuple[float, float, float, float]] = None
 
 
 class LessonSection(BaseModel):
@@ -179,11 +184,12 @@ def is_reference_title(title: str) -> bool:
     return normalize(title).lower() in _REFERENCE_TITLES
 
 
-def _reading_order_ok(needle: str, blocks: list[Block]) -> bool:
-    """quote 必须落在阅读顺序连续的若干行里。
+def _locate(needle: str, blocks: list[Block]) -> Optional[tuple[int, int]]:
+    """在若干块里找 needle，返回它覆盖的**块下标区间**（首、尾）。
 
     同一页里行的 y 坐标应当一路往下走；出现大幅回跳只可能是换了栏或跳到了
     另一段（双栏排版里左栏末尾接右栏开头就是这个形状），那属于拼接，不算引用。
+    所以一路往后试，只认第一次 y 单调不回头的位置。
     """
     joined = ""
     owner: list[int] = []
@@ -192,18 +198,40 @@ def _reading_order_ok(needle: str, blocks: list[Block]) -> bool:
         joined += t
         owner.extend([i] * len(t))
     if not joined or not needle:
-        return False
+        return None
     start = 0
     while True:
         pos = joined.find(needle, start)
         if pos < 0:
-            return False
+            return None
         first, last = owner[pos], owner[pos + len(needle) - 1]
         ys = [blocks[i].bbox[1] for i in range(first, last + 1)
               if blocks[i].bbox is not None]
         if all(b2 >= b1 - _Y_TOL for b1, b2 in zip(ys, ys[1:])):
-            return True
+            return first, last
         start = pos + 1
+
+
+def _reading_order_ok(needle: str, blocks: list[Block]) -> bool:
+    return _locate(needle, blocks) is not None
+
+
+def locate_quote(needle: str, blocks: list[Block]) -> list[int]:
+    """`quote` 盖住了哪几块（返回 blocks 里的下标）。定位不到就是空列表。
+
+    `quote` 是纯文本，前端想"点一下就高亮原文那一行"必须知道落在哪些块上；
+    只有页码的话，同一页几十行里根本找不着。
+    """
+    hit = _locate(needle, blocks)
+    return list(range(hit[0], hit[1] + 1)) if hit else []
+
+
+def _merge_bbox(blocks: list[Block], idxs: list[int]) -> Optional[tuple[float, float, float, float]]:
+    boxes = [blocks[i].bbox for i in idxs if blocks[i].bbox is not None]
+    if not boxes:
+        return None
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes))
 
 
 def verify_refs(refs: list[SourceRef], page_text: dict[int, str],
@@ -215,7 +243,15 @@ def verify_refs(refs: list[SourceRef], page_text: dict[int, str],
         if len(needle) < 6 or needle not in hay:
             continue
         page_blocks = blocks.get(r.page) if blocks else None
-        if page_blocks and not _reading_order_ok(needle, page_blocks):
+        if not page_blocks:
+            ok.append(r)
             continue
-        ok.append(r)
+        idxs = locate_quote(needle, page_blocks)
+        if not idxs:
+            continue
+        # 定位成功就把"在哪几块、占多大一块地方"一起写进 ref —— 下游（讲义、习题、
+        # 前端高亮）全靠这两个字段把出处点回原文。
+        ok.append(SourceRef(page=r.page, quote=r.quote,
+                            blocks=[page_blocks[i].id for i in idxs],
+                            bbox=_merge_bbox(page_blocks, idxs)))
     return ok

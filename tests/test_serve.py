@@ -162,4 +162,10 @@ def test_lesson_job_writes_a_lesson(doc_pdf, monkeypatch):
     written = Path(result["file"])
     assert written.exists()
     assert written.parent == serve.OUT_DIR
-    assert "知识点A" in written.read_text(encoding="utf-8")
+    text = written.read_text(encoding="utf-8")
+    assert "知识点A" in text
+    # 落盘的 JSON 里必须带 blocks / bbox —— 前端要凭它们把出处高亮回原文，
+    # 少一个字段就只能干瞪眼。
+    ref = result["lesson"]["sections"][0]["source_refs"][0]
+    assert ref["blocks"], ref
+    assert ref["bbox"] is not None, ref

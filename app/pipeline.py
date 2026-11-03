@@ -160,8 +160,12 @@ def make_quiz(llm, lessons, n, page_text, blocks=None, source=""):
             # 没出处的题学生点不回原文，可溯源等于没做，一律丢弃。
             if not q.source_ref:
                 continue
-            if not verify_refs([q.source_ref], page_text, blocks):
+            ok = verify_refs([q.source_ref], page_text, blocks)
+            if not ok:
                 continue
+            # 换掉而不是改原对象：verify_refs 顺手把 blocks / bbox 填好了，
+            # 前端要高亮原文靠的就是这两个字段。
+            q.source_ref = ok[0]
             # 校验过了再把摘录里的换行压平：OCR 的行是断开的，逐字通过的 quote
             # 常常长这样「电磁波的传播可\n不需介质」，存进讲义很难看。
             q.source_ref.quote = _squeeze(q.source_ref.quote)

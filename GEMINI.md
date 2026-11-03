@@ -1,6 +1,6 @@
 # GEMINI.md
 
-> 这个项目由一位人类 + 多个模型轮值开发。前面的工作已经跑通、并被 56 条测试锁住。
+> 这个项目由一位人类 + 多个模型轮值开发。前面的工作已经跑通、并被 68 条测试锁住。
 > **接手的第一个动作：读完本文件，再读 `docs/ROADMAP.md`，再动代码。**
 >
 > 你的前任留下一份交接文档 `docs/ROADMAP.md`（十节：现状 / 架构 / 踩过的坑 / 硬约束 /
@@ -44,7 +44,7 @@
 | 1 | `docs/ROADMAP.md` | 主交接文档，尤其 §3「已经踩平的地」和 §4「硬约束」 |
 | 2 | `docs/DECISIONS.md` | 关键决策的来龙去脉：为什么段落要合并、为什么出题要喂原文 |
 | 3 | `app/schema.py` | 数据模型 + 出处校验（`locate_quote` 就在这改） |
-| 4 | `tests/` 里的测试名 | 56 条测试的名字就是"哪些行为被锁住了"的清单 |
+| 4 | `tests/` 里的测试名 | 68 条测试的名字就是"哪些行为被锁住了"的清单 |
 
 ---
 
@@ -69,58 +69,39 @@
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q          # 必须 56 passed
+.\.venv\Scripts\python.exe -m pytest -q          # 必须 68 passed
 .\.venv\Scripts\python.exe -m app.serve          # → http://127.0.0.1:8765
 ```
 
 ---
 
-## 交接第一棒：P0-1 给 `SourceRef` 补 bbox
+## ~~交接第一棒：P0-1 给 `SourceRef` 补 bbox~~（已完成，commit 见 git log）
 
 **为什么**：`SourceRef` 只有 `page` + `quote`。前端想"点出处跳到原文并高亮那一行"需要坐标。
 `Block.bbox` 明明有，但 `verify_refs` 校验完就把位置丢了 —— 而校验过程本身**已经知道** quote
 落在哪几行。
 
-**怎么改**（`app/schema.py:182`，`_reading_order_ok` 目前只返回 bool）：
-
-```python
-def locate_quote(needle: str, blocks: list[Block]) -> list[int] | None:
-    """quote 落在阅读顺序连续的哪几行（返回块下标）。找不到返回 None。"""
-    joined, owner = "", []
-    for i, b in enumerate(blocks):
-        t = normalize(b.text)
-        joined += t
-        owner.extend([i] * len(t))
-    if not joined or not needle:
-        return None
-    start = 0
-    while True:
-        pos = joined.find(needle, start)
-        if pos < 0:
-            return None
-        first, last = owner[pos], owner[pos + len(needle) - 1]
-        ys = [blocks[i].bbox[1] for i in range(first, last + 1) if blocks[i].bbox]
-        if all(b2 >= b1 - _Y_TOL for b1, b2 in zip(ys, ys[1:])):
-            return list(range(first, last + 1))
-        start = pos + 1
-```
-
-`verify_refs` 命中时顺手回填，`SourceRef` 加两个带默认值的字段（向后兼容旧 JSON）：
+**落地形态**（比草案改了两处）：
 
 ```python
 class SourceRef(BaseModel):
     page: int
     quote: str
-    blocks: list[int] = []                                   # 落在哪些段落（块下标）
+    blocks: list[str] = []                                    # 落在哪些块（记 Block.id，不是下标）
     bbox: Optional[tuple[float, float, float, float]] = None  # 合并后的外框
 ```
 
-**验收**：
-- 新增 `test_verify_refs_fills_bbox_on_hit` / `test_verify_refs_leaves_bbox_empty_on_miss`
-- 变异：`locate_quote` 恒返回 `None` → 新测试必须变红
-- 真跑一章，检查 `lesson.sections[*].source_refs[*].bbox` 都不是 `None`
+- `_reading_order_ok` 拆成 `_locate(needle, blocks) -> tuple[int, int] | None`（返回首尾下标）
+  + `_reading_order_ok`（薄包装，保留旧名字给旧调用点）+ `locate_quote(needle, blocks) -> list[int]`
+  （返回下标列表，调用方要的是"哪几块"）+ `_merge_bbox(blocks, idxs)`。
+- `blocks` 存 `Block.id` 而不是下标：跨页/重排后下标会漂，id 不会；调试时也一眼能对上。
+- `verify_refs` 命中后返回**新的** `SourceRef`（带 blocks+bbox），不再是原对象直通。
+  `make_quiz` 因此要把返回值赋回 `q.source_ref = ok[0]`，否则 enrich 过的结果丢了。
 
-做完这个再往下走 §5 的 P0-2（拆静态文件）、P0-3（生成记录索引），然后是 P1 的三栏界面。
+**验收（已达成）**：`tests/test_schema.py` 四条 + `tests/test_pipeline.py` 两条断言 +
+`tests/test_serve.py` 断言落盘 JSON 带 blocks/bbox；变异四条全部击杀。
+
+下一棒是 §5 的 P0-2（拆静态文件）、P0-3（生成记录索引），然后是 P1 的三栏界面。
 
 ---
 

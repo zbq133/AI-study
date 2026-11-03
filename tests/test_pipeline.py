@@ -58,9 +58,12 @@ def test_build_lesson_drops_fake_refs_and_bad_quiz():
     lesson = build_lesson(FakeLLM(), make_ir(), "第1章", n_quiz=2)
     assert len(lesson.sections) == 1
     assert [r.quote for r in lesson.sections[0].source_refs] == [QUOTE]
+    # 定位到的块要一路带到讲义里：前端靠它把出处高亮回原文
+    assert [r.blocks for r in lesson.sections[0].source_refs] == [["b2"]]
     assert len(lesson.quiz) == 1
     assert lesson.quiz[0].stem.startswith("好题")
     assert lesson.quiz[0].verified is True
+    assert lesson.quiz[0].source_ref.blocks == ["b2"]
 
 
 def test_quiz_prompt_carries_source_with_page_numbers():

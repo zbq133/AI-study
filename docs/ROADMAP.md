@@ -22,7 +22,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 代码 | `app/` 7 个模块约 1650 行，`tests/` 56 条测试全绿 |
+| 代码 | `app/` 7 个模块约 1650 行，`tests/` 68 条测试全绿 |
 | 后端内核 | **约 90%**：解析 → 切章 → 大纲 → 逐节讲 → 出题 → 独立验证 → 落盘，端到端真跑通过 |
 | 外壳 | **约 60%**：CLI + 本地 Web 服务（`app/serve.py`，上传/解析/生成/SSE 进度） |
 | 界面 | **约 15%**：一个单页表单 + 进度条 + `<pre>` 结果，能用但不像产品 |
@@ -180,51 +180,27 @@ p.write_bytes(p.read_bytes().replace(b"\r\n", b"\n"))
 **为什么**：`SourceRef` 只有 `page` + `quote`。前端想"点出处跳到原文并高亮那一行"，需要坐标。
 `Block.bbox` 明明有，但 `verify_refs` 校验完就把它丢了 —— 而**校验过程本身已经知道 quote 落在哪几行**。
 
-**怎么改**：把 `app/schema.py:182` 的 `_reading_order_ok` 改成返回位置而不是 bool：
+**✅ 已完成**，落地形态比原草案改了两处：
 
 ```python
-def locate_quote(needle: str, blocks: list[Block]) -> list[int] | None:
-    """quote 落在阅读顺序连续的哪几行（返回块下标）。找不到返回 None。"""
-    joined, owner = "", []
-    for i, b in enumerate(blocks):
-        t = normalize(b.text)
-        joined += t
-        owner.extend([i] * len(t))
-    if not joined or not needle:
-        return None
-    start = 0
-    while True:
-        pos = joined.find(needle, start)
-        if pos < 0:
-            return None
-        first, last = owner[pos], owner[pos + len(needle) - 1]
-        ys = [blocks[i].bbox[1] for i in range(first, last + 1) if blocks[i].bbox]
-        if all(b2 >= b1 - _Y_TOL for b1, b2 in zip(ys, ys[1:])):
-            return list(range(first, last + 1))
-        start = pos + 1
+class SourceRef(BaseModel):
+    page: int
+    quote: str
+    blocks: list[str] = []                                    # 落在哪些块（记 Block.id，不是下标）
+    bbox: Optional[tuple[float, float, float, float]] = None  # 合并后的外框
 ```
 
-`verify_refs` 命中时顺手回填：
+- `_reading_order_ok` 拆成 `_locate(needle, blocks) -> tuple[int, int] | None`（首尾下标）
+  + `_reading_order_ok`（薄包装，旧调用点不动）+ `locate_quote(needle, blocks) -> list[int]`
+  + `_merge_bbox(blocks, idxs)`（取非空 bbox 的 min x0 / min y0 / max x1 / max y1）。
+- **`blocks` 存 `Block.id` 而不是页内下标**：下标跨页会重排，id 不会漂；调试时也能直接对上。
+- `verify_refs` 命中后返回**新的** `SourceRef`（带 blocks+bbox）。调用方必须把返回值接住 ——
+  `make_quiz` 里就是 `q.source_ref = ok[0]`，否则 enrich 过的对象被丢掉。
+- 无几何信息（`blocks=None`）时原样返回旧对象，纯文本调用不受影响。
 
-```python
-hits = locate_quote(needle, page_blocks)
-r.blocks = hits                      # 新增字段
-r.bbox = 合并几个块的 bbox           # 新增字段
-```
-
-`SourceRef` 加两个字段（都有默认值，向后兼容旧 JSON）：
-
-```python
-blocks: list[int] = []       # 落在哪些段落（块下标）
-bbox: Optional[tuple[float, float, float, float]] = None
-```
-
-> 注意：块下标是**这一页 blocks 列表**里的下标，前端要按 `page_block_map(ir)[page]` 取同一份列表才对得上。跨页引用不用支持（校验本来就按页做）。
-
-**验收**：
-- 新增 `test_verify_refs_fills_bbox_on_hit` / `test_verify_refs_leaves_bbox_empty_on_miss`
-- 变异：`locate_quote` 恒返回 `None` → 新测试必须变红
-- 真跑一章，检查 `lesson.sections[*].source_refs[*].bbox` 都不是 `None`
+**验收（已达成）**：`tests/test_schema.py` 四条 + `tests/test_pipeline.py` 两条断言 +
+`tests/test_serve.py` 断言落盘 JSON 带 blocks/bbox；变异四条（`locate_quote` 恒空 /
+`_merge_bbox` 只取第一块 / `verify_refs` 不写 blocks / `_locate` 去掉行序检查）全部击杀。
 
 #### P0-2 把界面拆成静态文件（不引构建链）
 
@@ -454,8 +430,8 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 | # | 改动 | 所属 | 破坏性 |
 |---|---|---|---|
-| 1 | `SourceRef` 加 `blocks: list[int]`、`bbox` | P0-1 | 否（有默认值） |
-| 2 | `_reading_order_ok` → `locate_quote` 返回位置 | P0-1 | 内部函数，不影响外部 |
+| 1 | `SourceRef` 加 `blocks: list[str]`、`bbox` | ✅ P0-1 已完成 | 否（有默认值） |
+| 2 | `_reading_order_ok` → `locate_quote` 返回位置 | ✅ P0-1 已完成 | 内部函数，不影响外部 |
 | 3 | `GET /api/docs/{id}/layout` 返回本章页的 blocks | P1-1 | 新增 |
 | 4 | `POST /api/jobs/{id}/cancel` | P1-3 | 新增 |
 | 5 | `GET /api/lessons` 列表 / `GET /api/lessons/{id}` | P0-3 | 新增 |
@@ -473,7 +449,7 @@ pdf.js 渲染页面 canvas，按 `bbox` 在上面画半透明矩形覆盖层。
 
 ```powershell
 cd "D:\AI study"
-.\.venv\Scripts\python.exe -m pytest -q          # 必须 56 passed（截至 d9f6e0f）
+.\.venv\Scripts\python.exe -m pytest -q          # 必须 68 passed（P0-1 完成时）
 .\.venv\Scripts\python.exe -m app.serve          # 打开 127.0.0.1:8765 走一遍
 Get-Content docs\DECISIONS.md                     # 看关键决策的来龙去脉
 ```
