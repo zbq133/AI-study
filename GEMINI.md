@@ -124,6 +124,16 @@ class SourceRef(BaseModel):
 
 ---
 
+## 本机运行环境（别改）
+
+- `gemini` 0.66.0 已装好，`cd "D:\AI study"; gemini` 直接可用，**不需要** `--model` 或任何参数。
+  配置细节见 `docs/GEMINI-SETUP.md`。
+- 模型固定 `gemini-3-flash-preview`。`gemini-2.5-flash` 对新用户已停（404），别改回去。
+- **免费层 5 次请求/分钟。** 撞了会原地等 46 秒。所以：一次给一个完整的小目标，
+  别用试探式的一问一答;  把方案先写进文件再执行;  重活交给 `python -m app.cli` 和
+  `python -m app.serve`（本地算力，不烧配额）。
+- 网络走 `127.0.0.1:7897` 代理，已配在用户环境变量里。
+
 ## 明确不要做的事
 
 | 别做 | 为什么 |
