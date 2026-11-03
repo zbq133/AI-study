@@ -735,7 +735,8 @@ applyTheme(readTheme());
 
 /* ---------- 原文栏可折叠 ---------- */
 
-const SRC_KEY = 'study.srcCollapsed';
+// 存的是「展开过」而不是「收起过」：没存过就是收起，先让人看讲义。
+const SRC_KEY = 'study.srcExpanded';
 
 function srcCollapsed() {
   return document.querySelector('.cols').classList.contains('no-src');
@@ -744,13 +745,13 @@ function srcCollapsed() {
 function setSourceCollapsed(on) {
   document.querySelector('.cols').classList.toggle('no-src', on);
   $('#srcToggle').textContent = on ? '展开原文' : '收起原文';
-  try { localStorage.setItem(SRC_KEY, on ? '1' : '0'); } catch (e) { /* 无所谓 */ }
+  try { localStorage.setItem(SRC_KEY, on ? '0' : '1'); } catch (e) { /* 无所谓 */ }
 }
 
 $('#srcToggle').onclick = () => setSourceCollapsed(!srcCollapsed());
 
-try {
-  if (localStorage.getItem(SRC_KEY) === '1') setSourceCollapsed(true);
-} catch (e) { /* 无所谓 */ }
+let _srcExpanded = null;
+try { _srcExpanded = localStorage.getItem(SRC_KEY); } catch (e) { /* 无所谓 */ }
+setSourceCollapsed(_srcExpanded !== '1');      // 默认收起
 
 

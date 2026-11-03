@@ -236,6 +236,22 @@ def test_source_column_can_be_collapsed(env):
     assert js.index("srcCollapsed()", ref) < js.index("scrollIntoView", ref)
 
 
+def test_source_column_starts_collapsed_and_text_keeps_three_quarters(env):
+    """默认收起原文（先看讲义），收起时正文只占四分之三宽 —— 一行拉满读不下去。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+        js = client.get("/static/app.js").text
+    # 存的是「展开过」；没存过 → 收起
+    assert "study.srcExpanded" in js
+    assert re.search(r"setSourceCollapsed\(_srcExpanded !== '1'\)", js), "默认没落成收起"
+    # 收起来的那套栅格下，讲义正文要留出四分之一空白
+    rule = re.search(r"\.cols\.no-src\s+#lessonBody\s*\{([^}]*)\}", css)
+    assert rule, "收起时没给讲义限宽"
+    m = re.search(r"padding-right:\s*(\d+)%", rule.group(1))
+    assert m, rule.group(1)
+    assert 15 <= int(m.group(1)) <= 35, f"留白比例 {m.group(1)}% 不合理"
+
+
 def test_theme_reaches_the_page_before_the_first_paint(env):
     """主题要在 <head> 里就套上，不然暗色页面会先闪一下白。"""
     with TestClient(serve.app) as client:

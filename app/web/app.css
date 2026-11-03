@@ -231,4 +231,6 @@ button.ghost { background: transparent; border-color: var(--line3); color: var(-
 /* 收起原文之后，讲义独占整行 */
 .cols.no-src { grid-template-columns: 200px minmax(0, 1fr); }
 .cols.no-src #source { display: none; }
+/* 收起原文后讲义独占整行，一行会拉得太长：只让文字占四分之三，右边留白。 */
+.cols.no-src #lessonBody { padding-right: 25%; }
 .colhead .spacer { flex: 1 1 auto; }
