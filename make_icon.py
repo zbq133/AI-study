@@ -35,17 +35,28 @@ def load_art() -> Image.Image:
     return art.crop(box)
 
 
+def feather_only(art: Image.Image, keep: float = 0.70) -> Image.Image:
+    """只要羽毛、不要那行字。
+
+    16~32px 上，"study" 那几个字母缩完是一团灰糊 —— 与其糊着，不如留一根干净的羽毛。
+    切的时候往下多留一点（羽毛笔尖本来压在 s 上），切口落在字上方。
+    """
+    h = round(art.height * keep)
+    return art.crop((0, 0, art.width, h))
+
+
 def compose(art: Image.Image, size: int) -> Image.Image:
     plate = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(plate)
     r = int(size * RADIUS_RATIO)
     d.rounded_rectangle((0, 0, size - 1, size - 1), radius=r, fill=PLATE + (255,))
 
-    # 线稿是细笔触：小尺寸直接缩会糊成灰雾。先把 alpha 撑粗一档再缩，笔画才立得住。
-    src = art
-    if size <= 32:
-        src = art.copy()
-        src.putalpha(art.getchannel("A").filter(ImageFilter.MaxFilter(5)))
+    # 线稿是细笔触：小尺寸直接缩会糊成灰雾，而且那行字缩完就是一团。
+    # 32 及以下只留羽毛（笔画在框里更大更干净），48 起才带字。
+    src = feather_only(art) if size <= 48 else art
+    if size <= 48:
+        src = src.copy()
+        src.putalpha(src.getchannel("A").filter(ImageFilter.MaxFilter(3)))
     elif size <= 48:
         src = art.copy()
         src.putalpha(art.getchannel("A").filter(ImageFilter.MaxFilter(3)))
