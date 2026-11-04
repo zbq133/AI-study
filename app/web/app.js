@@ -1100,7 +1100,7 @@ async function firstRun() {
   } catch (e) { return; }                      // 连不上就别打扰
   if (!cfg) return;
   if (cfg.ready) { markWelcomed(); return; }
-  openSettings();
+  await openSettings();          // 要等它把面板画完，否则下面那句提示会被 paintSettings 覆盖
   showTab('model');
   const url = $('#setUrl');
   if (url && !url.value) url.value = 'https://api.deepseek.com';   // DeepSeek 官方地址

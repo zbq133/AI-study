@@ -654,6 +654,8 @@ def test_first_run_walks_people_to_the_model_tab(env):
     assert "localStorage.getItem(WELCOME_KEY)" in body   # 只在没填过的时候打扰一次
     assert "/api/config" in body and "cfg.ready" in body
     assert "openSettings()" in body and "showTab('model')" in body
+    # 必须先 await 打开面板、再写提示，否则会被 paintSettings 覆盖掉
+    assert body.index("await openSettings()") < body.index("msg.textContent")
     assert "https://api.deepseek.com" in body    # 地址先替人填好
     assert "firstRun();" in js                   # 启动时真的调了
 
