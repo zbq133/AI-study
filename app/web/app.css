@@ -19,9 +19,11 @@ input, textarea, select { -webkit-user-select: text; user-select: text; }
 * { -webkit-tap-highlight-color: transparent; }
 
 /* ---- 顶栏 ---- */
+/* 顶栏是拖窗口的地方，得跟下面的内容区分开：底色调深一档 + 一条明显的分隔线 + 轻微内阴影。
+   靠 --top 一个变量切换深浅两套，别再写死颜色。 */
 .top { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-       border-bottom: 1px solid var(--line); background: var(--top); flex: 0 0 auto;
-       flex-wrap: wrap; }
+       border-bottom: 1px solid var(--top-line); background: var(--top); flex: 0 0 auto;
+       flex-wrap: wrap; box-shadow: inset 0 -6px 12px -10px rgba(0, 0, 0, .35); }
 .brand { font-weight: 600; font-size: 15px; letter-spacing: .02em; margin-right: 6px; }
 .sep { flex: 1; }
 /* 原生 file 控件连"未选择文件"那片空白都能点，判定范围太大：收成 1px，
@@ -336,14 +338,14 @@ button.danger:disabled { opacity: .4; }
 }
 :root[data-theme="light"] {
   /* 浅色底再抬亮一档：原来 #eef1f4 偏灰，整屏看着发闷 */
-  --bg:#f7f9fc; --top:#ffffff; --code:#eff4fa;
+  --bg:#f7f9fc; --top:#e6eefa; --code:#eff4fa;
   --panel:#ffffff; --panel2:#f3f7fc;
   --line:#e3eaf3; --line2:#d4dde8; --line3:#bcc8d8;
   --fg:#1b2431; --fg2:#0c1420;
   --dim:#3c4756; --dim2:#4b5765; --dim3:#5f6b7a;
   --accent:#2563eb; --ok:#0f7a43; --bad:#c02b22; --warn:#7d5c05;
   --hl-bg:#ddf2e6; --hl-fg:#0c3a22; --hl-line:#2f8a55;
-  --top-line:#e3eaf3; --btn-bg:#2563eb; --btn-line:#1d55d0; --btn-fg:#ffffff;
+  --top-line:#c9d8ec; --btn-bg:#2563eb; --btn-line:#1d55d0; --btn-fg:#ffffff;
   --chip-bg:#eaf2fe; --chip-fg:#1b5bbf; --chip-line:#c2d6f2;
   --chip-bg-hover:#dcebfd; --chip-fg-hover:#14479a;
   --opt-on-bg:#e6f0fd; --opt-on-fg:#1b2431; --opt-on-b:#2563eb;

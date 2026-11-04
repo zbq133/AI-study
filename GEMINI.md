@@ -95,7 +95,7 @@ cd "D:\AI study"
 | 1 | `docs/ROADMAP.md` | 主交接文档：§3「已经踩平的地」、§4「硬约束」、§9「已知问题」、**§11「接下来做什么」** |
 | 2 | `docs/DECISIONS.md` | 每个决定的来龙去脉（为什么段落要合并、为什么出题要喂原文、为什么 .hide 缺了一下午） |
 | 3 | `app/schema.py` | 数据模型 + 出处校验（`SourceRef.blocks/bbox`、`locate_quote`） |
-| 4 | `app/serve.py` | 17 个端点 + 任务/取消/成本闸/设置，一个文件看完全部外壳 |
+| 4 | `app/serve.py` | 18 个端点 + 任务/取消/成本闸/设置，一个文件看完全部外壳 |
 | 5 | `tests/` 里的测试名 | 217 条测试名就是"哪些行为被锁住了"的清单 |
 
 ---
@@ -119,7 +119,10 @@ app/
   errors.py   157  StudyError 家族：kind/title/hint，人看得懂的那种；is_fatal 判"该不该中止"
   settings.py 143  设置优先级 settings.json > 环境变量；带 mtime 缓存；永不回明文密钥
   store.py    121  out/index.json 索引：原子写、坏索引当空、加锁、批量删、file 只取文件名防穿越
-  serve.py    720  FastAPI：17 端点、线程池任务、SSE 进度、日志、探活
+  export.py   320  讲义→PDF：LaTeX 兜底成 Unicode、Markdown 子集转 HTML、PyMuPDF Story 排版
+                   · 字体塞 Archive + @font-face，subsets_fonts 后 19 MB→84 KB
+                   · 别用临时文件中转：Windows 上句柄没放，19 MB 垃圾删不掉 → 写 BytesIO
+  serve.py    760  FastAPI：18 端点、线程池任务、SSE 进度、日志、探活
   desktop.py  218  客户端外壳：后台起 uvicorn + pywebview 原生窗口；端口复用/让位
                    · _ensure_streams()：窗口版 exe 没有控制台，sys.stdout 是 None
   cli.py       98  命令行入口

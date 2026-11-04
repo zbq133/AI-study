@@ -822,6 +822,39 @@ def test_history_search_filters(doc_pdf, monkeypatch):
         assert client.get("/api/lessons?q=静电场").json()["lessons"] == []
 
 
+def test_export_lesson_returns_a_pdf(doc_pdf, monkeypatch):
+    """点「导出讲义」拿到的该是一份能打开的 PDF，不是 JSON。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        lid = _wait(client, _lesson_job(client, doc_pdf))["result"]["lesson_id"]
+        r = client.get(f"/api/lessons/{lid}/export.pdf")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+        assert "attachment" in r.headers["content-disposition"]
+        assert r.content.startswith(b"%PDF-")
+        doc = fitz.open("pdf", r.content)
+        try:
+            assert doc.page_count >= 1
+        finally:
+            doc.close()
+        # 排版结果要落盘（下次点同一个不用重排），但不能盖掉原始讲义 JSON
+        assert (serve.OUT_DIR / "exports").is_dir()
+        assert Path(_wait(client, _lesson_job(client, doc_pdf))["result"]["file"]).exists()
+
+
+def test_export_unknown_or_missing_lesson_says_so(doc_pdf, monkeypatch):
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+    with TestClient(serve.app) as client:
+        assert client.get("/api/lessons/nope/export.pdf").status_code == 404
+        lid = _wait(client, _lesson_job(client, doc_pdf))["result"]["lesson_id"]
+        Path(serve._store().file_of(lid)).unlink()          # 模拟讲义 JSON 被手删
+        assert client.get(f"/api/lessons/{lid}/export.pdf").status_code == 410
+
+
 def test_delete_lesson_removes_the_file_too(doc_pdf, monkeypatch):
     for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
         monkeypatch.setenv(key, val)

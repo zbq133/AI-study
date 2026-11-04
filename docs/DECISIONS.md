@@ -573,3 +573,43 @@ applyTheme）都必须是 `'light'`，且不许再出现 `t.mode || 'dark'`。
 都没变红——因为同样的字符串在别处还出现了一次（生成路径、`markHistory` 自己）。
 改成先把 `openLesson` 的函数体切出来再断言、把赋值写成完整表达式，三条变异才全杀掉。
 **教训：断言"这个串存在"几乎总是太松，要断言它出现在哪个函数里。**
+## 2026-11-04 补记：导出 PDF（不引新依赖，用 PyMuPDF 的 Story）
+
+### 为什么不是 reportlab / weasyprint / 浏览器打印
+
+- `weasyprint` 在 Windows 上要 GTK，装不上；
+- `reportlab` 要新装依赖，而且要自己算每一行的位置；
+- 浏览器打印拿不到文件（WebView2 里还得用户再操作一次"另存为"）。
+
+PyMuPDF 已经在依赖里，`pymupdf.Story` 能直接吃 HTML + 一小撮 CSS 做分页排版，
+正是"标题 + 段落 + 列表 + 公式行"这种讲义需要的。**少一个依赖 = 少一次装不上的机会。**
+
+### Story 的两个硬要求（第一次写必踩）
+
+1. `story.write(writer, rectfn)` 的 `rectfn` 不能省：`rectfn(rect_num, filled)` 要返回
+   `(mediabox, where, pymupdf.Point(0, 0))`。只传 writer 会报
+   `missing 1 required positional argument: 'rectfn'`。
+2. 字体要经 `Archive().add(font, "study.ttc")` + CSS `@font-face{...src:url(study.ttc)}`，
+   否则中文全是方块。本机只有 `msyh.ttc` / `msyhbd.ttc` / `msyhl.ttc`，没有 simhei。
+
+### 19 MB → 84 KB：字体子集化
+
+Story 会把整个雅黑塞进 PDF（19 MB），一份讲义就 19 MB，导十份就是 190 MB。
+做法是先写进 `io.BytesIO`（**不是临时文件**），再 `pymupdf.open("pdf", buf.getvalue())`
+→ `doc.subset_fonts()` → `save(garbage=4, deflate=True)`。
+
+中间踩过一次：先写临时 `*.raw.pdf` 再删。在 Windows 上 PyMuPDF 关掉文档之后句柄还挂
+一会儿，`unlink()` 抛 `PermissionError`，被我 `except OSError: pass` 吞掉 —— 结果每导出
+一次就在 `out/exports/` 里留一个 19 MB 的垃圾。改成 BytesIO 之后问题消失。
+
+### LaTeX 只做"尽力而为"
+
+讲义里的公式是 `$\\lambda = u T$` 这种，Story 不认。`latex_to_text()` 翻常见的一层
+（希腊字母、运算符、`\\frac`、`\\sqrt`、上下标），**认不出的命令留名字、不吞内容** ——
+宁可让学生看到 `\\nosuchcmd`，也不能让公式在 PDF 里变成空白。测试专门盯这一条。
+
+### 顶栏要和内容区分开
+
+用户在客户端里拖窗口是拖顶栏那块。顶栏原来和内容同色（浅色主题下都是 #ffffff），
+看不出可拖区域。现在 `--top` 单独一档（浅色 #e6eefa / 深色 #121821）+ `--top-line`
+明显的分隔线 + 一点内阴影。**只改颜色变量，不动布局**。

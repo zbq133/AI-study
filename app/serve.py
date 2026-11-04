@@ -28,13 +28,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import __version__
+from . import export
 from . import settings as conf
 from .errors import MissingConfig, describe
 from .llm import LLM
 from .pdf import content_id, extract_ir, page_block_map
 from .pipeline import build_lesson
+from .schema import Lesson, build_sections, is_reference_title
 from .store import Store, make_id
-from .schema import build_sections, is_reference_title
 
 load_dotenv()
 
@@ -576,6 +577,32 @@ async def delete_lesson(lesson_id: str) -> dict:
         except OSError:
             pass                                  # 索引已经删了，文件删不掉不影响
     return {"ok": True}
+
+
+@app.get("/api/lessons/{lesson_id}/export.pdf")
+async def export_lesson(lesson_id: str) -> FileResponse:
+    """把一份讲义排成 PDF 下载。排版在 app/export.py 里，这里只负责取数据和回文件。"""
+    rec = _store().get(lesson_id)
+    if rec is None:
+        raise HTTPException(404, "没有这份讲义")
+    src = _store().file_of(lesson_id)
+    if src is None:
+        raise HTTPException(410, "讲义文件被删了，重新生成一次")
+    lesson = Lesson(**json.loads(src.read_text(encoding="utf-8")))
+
+    name = _safe(rec.get("chapter") or "讲义")
+    out = OUT_DIR / "exports" / f"{name}-{lesson_id}.pdf"
+    eff = conf.effective()
+    labels = dict(conf.STYLES)
+    export.lesson_pdf(
+        lesson, out,
+        source_name=rec.get("filename") or "",
+        style_label=labels.get(eff.get("style") or "", ""),
+        when=(rec.get("updated") or "").replace("T", " "),
+    )
+    return FileResponse(out, media_type="application/pdf",
+                        filename=f"{name}.pdf",
+                        headers={"cache-control": "no-store"})
 
 
 @app.post("/api/jobs/{job_id}/cancel")

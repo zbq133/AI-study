@@ -331,7 +331,21 @@ function markHistory(id) {
   for (const b of document.querySelectorAll('#histBody .hist-item')) {
     b.classList.toggle('on', b.dataset.id === openId);
   }
+  paintExport();
 }
+
+/* 导出讲义：只有当前摊着某一份时才有得导。 */
+function paintExport() {
+  $('#export').disabled = !openId;
+}
+
+$('#export').onclick = () => {
+  if (!openId) return;
+  $('#detail').textContent = '正在排版 PDF…';
+  // 走 location 而不是 fetch：让 WebView2 / 浏览器自己接管下载（fetch 拿到的 bytes 还得自己存盘）
+  location.href = `/api/lessons/${encodeURIComponent(openId)}/export.pdf`;
+  setTimeout(() => { $('#detail').textContent = '如果没弹下载，看浏览器的下载列表'; }, 1200);
+};
 
 function togglePick(id) {
   if (picked.has(id)) picked.delete(id); else picked.add(id);
@@ -1014,6 +1028,7 @@ $('#themeMode').addEventListener('click', e => {
 applyTheme(readTheme());
 applyFont(readFont());
 paintFont();
+paintExport();
 
 /* ---------- 原文栏可折叠 ---------- */
 
