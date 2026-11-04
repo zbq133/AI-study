@@ -646,6 +646,17 @@ def test_layout_returns_blocks_with_ids(env, doc_pdf):
     assert len(first["bbox"]) == 4
 
 
+def test_opening_an_old_lesson_points_the_source_column_at_its_own_pdf(env):
+    """打开旧讲义时得先认下它自己那份 PDF —— 否则 afterParse 里取原文还是在问上一份。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    body = js[js.index("async function openLesson"):js.index("function waitJob")]
+    assert body.index("docId = record.doc_id;") < body.index("await afterParse(")
+    # 取原文失败（还没解析好）要把清单清掉，不然同一批页永远不会重取
+    rs = js[js.index("function renderSource"):js.index("function paintSource")]
+    assert "_srcSpec = null" in rs and "if (!data)" in rs
+
+
 def test_a_page_is_served_as_an_image(env, doc_pdf):
     """原文栏显示的是原 PDF 的页面图，不是 OCR 出来的字。"""
     with TestClient(serve.app) as client:

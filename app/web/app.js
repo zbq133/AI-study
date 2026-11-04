@@ -396,6 +396,7 @@ async function openLesson(id) {
     await renderSource();      // 同一份 PDF 还开着，原文照旧能点
   } else if (record.doc_id && docId !== record.doc_id) {
     // 服务重启过，或者换了份 PDF：磁盘上有 uploads/<doc_id>.pdf 就能直接重解析
+    docId = record.doc_id;      // 必须先认下这份 PDF，afterParse 里就要按它取原文
     try {
       const p = await fetch(`/api/docs/${record.doc_id}/parse`, { method: 'POST' });
       const pj = await p.json();
@@ -406,7 +407,6 @@ async function openLesson(id) {
       } else {
         await afterParse(pj.result, false);
       }
-      docId = record.doc_id;
       $('#upMeta').textContent = record.filename || '';
       await renderSource();
       return;
@@ -632,6 +632,10 @@ function renderSource() {
     .then(data => {
       if (seq !== _srcSeq) return;     // 中途又换了章节，旧的那次丢掉
       layout = data;
+      if (!data) {                     // 这份 PDF 还没解析好（或者 docId 刚换）：留着下次再取
+        _srcSpec = null;
+        return;
+      }
       paintSource();
     })
     .catch(() => { /* 原文栏拿不到也不至于让讲义看不了 */ });
