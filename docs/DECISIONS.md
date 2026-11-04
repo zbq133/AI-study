@@ -654,3 +654,35 @@ Story 会把整个雅黑塞进 PDF（19 MB），一份讲义就 19 MB，导十�
 原来 `.modal` 上挂着 `e.target === modal → closeSettings()`。设置里有输入框和下拉，
 手一滑点到旁边，填了一半的密钥就没了。删掉这条，只留 ✕ 和 Esc —— **Esc 只在弹层开着时
 才响应**，别让它顺手把别的东西也关了。
+## 2026-11-04 补记：让它在别人的电脑上也别掉链子
+
+开发机上永远遇不到、换台机器就会咬人的四件事，都补上了。
+
+### 缺 WebView2 运行时 → 以前是"双击没反应"
+
+pywebview 的 `edgechromium` 后端要系统的 WebView2 运行时。Win11 自带，但精简系统、
+老 Win10、某些虚拟机里没有，`webview.start()` 抛异常而窗口版没有控制台 ——
+用户看到的只是一个什么都没发生。现在启动前先找
+`%ProgramFiles(x86)%\Microsoft\EdgeWebView\Application\*\msedgewebview2.exe`，
+找不到就弹系统对话框（`ctypes` 调 `MessageBoxW`，非 Windows 退回 stderr），
+把微软那个几 MB 的 Evergreen 引导包地址写清楚，并顺手打开下载页；退出码 3。
+判据是"有那个 exe"，不是"有那个目录"——装一半留下的空壳不算。
+
+### 目录写不进去 → 以前是上传全部 500
+
+`out/`、`uploads/`、`settings.json` 是相对当前目录的。装在 `C:\Program Files`、
+只读 U 盘、或者目录被公司策略锁了，第一次写就 `PermissionError`，走兜底错误变成
+"出错了 + traceback"。现在启动先真写一个探针文件（`os.access` 在 Windows 上会骗人），
+写不进去就把工作目录切到 `%LOCALAPPDATA%\AI Study` 再起服务。能写就别乱切。
+
+### 三无 exe → 加上版本资源
+
+`version_info.txt`（PyInstaller 的 `VSVersionInfo`）打进 exe：产品名、文件版本 1.0.0.0、
+原始文件名。右键属性能看出这是什么，SmartScreen 和杀软对"有名字有版本"的包也客气一点。
+`build_desktop.ps1` 里加了 `--version-file`，改这个 ps1 记得它必须是 **UTF-8 带 BOM**。
+
+### 第一次用不知道要填密钥 → 直接把设置打开
+
+`/api/config` 说 `ready: false` 时，`firstRun()` 自动打开设置、切到「模型接入」、
+把地址预填成 `https://api.deepseek.com`，并在提示行写"把密钥填进去就能开始"。
+用 `localStorage['study.welcomed']` 记住 —— 保存过一次就不再打扰，别每次启动都弹。

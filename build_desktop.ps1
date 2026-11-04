@@ -29,6 +29,7 @@ Write-Host '== 3/3 打包（几分钟，onnxruntime 很大）' -ForegroundColor 
     --noconfirm --clean --windowed `
     --name 'AI Study' `
     --icon 'app\desktop.ico' `
+    --version-file 'version_info.txt' `
     --add-data 'app\web;app\web' `
     --collect-all webview `
     --collect-all pymupdf `

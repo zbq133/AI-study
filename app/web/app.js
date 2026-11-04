@@ -872,6 +872,7 @@ async function saveSettings(extra) {
   if (!r.ok) throw new Error(data.detail || '保存失败');
   paintSettings(data);
   $('#setMsg').textContent = '保存好了';
+  markWelcomed();                  // 已经填过设置了，以后别再自动弹出来
 }
 
 $('#setSave').onclick = async () => {
@@ -1082,5 +1083,35 @@ $('#srcToggle').onclick = () => setSourceCollapsed(!srcCollapsed());
 let _srcExpanded = null;
 try { _srcExpanded = localStorage.getItem(SRC_KEY); } catch (e) { /* 无所谓 */ }
 setSourceCollapsed(_srcExpanded !== '1');      // 默认收起
+
+/* ---------- 第一次打开：把人领到「模型接入」 ---------- */
+
+// 没填密钥时点了生成只会得到一句"还差模型配置"，不如一开始就把设置打开、把地址填好。
+const WELCOME_KEY = 'study.welcomed';
+
+async function firstRun() {
+  let seen = null;
+  try { seen = localStorage.getItem(WELCOME_KEY); } catch (e) { /* 无所谓 */ }
+  if (seen) return;
+  let cfg = null;
+  try {
+    const r = await fetch('/api/config');
+    if (r.ok) cfg = await r.json();
+  } catch (e) { return; }                      // 连不上就别打扰
+  if (!cfg) return;
+  if (cfg.ready) { markWelcomed(); return; }
+  openSettings();
+  showTab('model');
+  const url = $('#setUrl');
+  if (url && !url.value) url.value = 'https://api.deepseek.com';   // DeepSeek 官方地址
+  const msg = $('#setMsg');
+  if (msg) msg.textContent = '第一次用：把 API 密钥填进去（旁边有「获取 API」的入口），保存后就能生成讲义。';
+}
+
+function markWelcomed() {
+  try { localStorage.setItem(WELCOME_KEY, '1'); } catch (e) { /* 无所谓 */ }
+}
+
+firstRun();
 
 

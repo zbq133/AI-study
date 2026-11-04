@@ -646,6 +646,25 @@ def test_layout_returns_blocks_with_ids(env, doc_pdf):
     assert len(first["bbox"]) == 4
 
 
+def test_first_run_walks_people_to_the_model_tab(env):
+    """第一次打开、还没配密钥：别让人对着"还差模型配置"发呆，直接把设置打开。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    body = js[js.index("async function firstRun"):js.index("function markWelcomed")]
+    assert "localStorage.getItem(WELCOME_KEY)" in body   # 只在没填过的时候打扰一次
+    assert "/api/config" in body and "cfg.ready" in body
+    assert "openSettings()" in body and "showTab('model')" in body
+    assert "https://api.deepseek.com" in body    # 地址先替人填好
+    assert "firstRun();" in js                   # 启动时真的调了
+
+
+def test_saving_the_settings_stops_the_first_run_nag(env):
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    save = js[js.index("async function saveSettings"):js.index("$('#setSave').onclick")]
+    assert "markWelcomed()" in save
+
+
 def test_opening_an_old_lesson_points_the_source_column_at_its_own_pdf(env):
     """打开旧讲义时得先认下它自己那份 PDF —— 否则 afterParse 里取原文还是在问上一份。"""
     with TestClient(serve.app) as client:

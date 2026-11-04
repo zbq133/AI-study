@@ -23,6 +23,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import webbrowser
+from pathlib import Path
 
 import uvicorn
 
@@ -33,6 +35,16 @@ from .serve import app
 PREFERRED_PORT = 8765
 HOST = "127.0.0.1"
 START_TIMEOUT = 30.0
+
+#: WebView2 运行时可能被装在这几个地方（用户级安装在最下面那个）。
+WEBVIEW2_DIRS = (
+    r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+    r"C:\Program Files\Microsoft\EdgeWebView\Application",
+    r"%LOCALAPPDATA%\Microsoft\EdgeWebView\Application",
+)
+#: 微软官方的 Evergreen 引导包（下完是个小 exe，双击装完就行）。
+WEBVIEW2_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+
 
 
 def free_port() -> int:
@@ -81,6 +93,94 @@ def _ensure_streams() -> None:
     for name in ("stdout", "stderr"):
         if getattr(sys, name, None) is None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+
+
+# ---------------------------------------------------------------- 前置自检
+# 这两件事在开发机上永远遇不到，到了别人的电脑上就是"双击没反应"和"上传全部 500"。
+
+
+def webview2_available(dirs=None) -> bool:
+    """这台机器上有没有 WebView2 运行时（pywebview 的 edgechromium 后端靠它）。
+
+    Win11 和较新的 Win10 自带；精简系统、长期没更新的 Win10、某些虚拟机里没有。
+    没有的话 `webview.start()` 会抛异常，而窗口版没有控制台 —— 用户只会看到"点了没反应"。
+    """
+    for raw in (dirs if dirs is not None else WEBVIEW2_DIRS):
+        base = Path(os.path.expandvars(raw))
+        try:
+            if not base.is_dir():
+                continue
+            for child in base.iterdir():
+                if child.is_dir() and (child / "msedgewebview2.exe").is_file():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _say(text: str, title: str = "AI Study") -> None:
+    """弹一个系统对话框（窗口版没有控制台，print 没人看得见）。非 Windows 就退回 stderr。"""
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, text, title, 0x00000040)  # MB_ICONINFORMATION
+    except Exception:
+        print(f"[{title}] {text}", file=sys.stderr)
+
+
+def ensure_webview2(*, ask=None, open_url=None) -> bool:
+    """没有运行时就告诉人怎么办，并可以帮着打开下载页。返回能不能继续开窗。"""
+    if webview2_available():
+        return True
+    opener = open_url or webbrowser.open
+    text = (
+        "这台电脑缺少「Microsoft Edge WebView2 运行时」，窗口开不出来。\n\n"
+        "它是微软的一个小运行时（几 MB），装一次就好：\n"
+        f"{WEBVIEW2_URL}\n\n"
+        "现在就去下载页吗？下完双击安装，再打开本程序即可。\n"
+        "（也可以只跑命令行版：AI Study.exe --no-window）"
+    )
+    if ask is None:
+        _say(text)
+        try:
+            opener(WEBVIEW2_URL)
+        except Exception:
+            pass
+        return False
+    if ask(text):
+        try:
+            opener(WEBVIEW2_URL)
+        except Exception:
+            pass
+    return False
+
+
+def _probe_writable(path: Path) -> None:
+    """真的写一个文件试试：只靠 `os.access` 在 Windows 上会骗人。"""
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / ".write-test"
+    probe.write_text("ok", encoding="utf-8")
+    probe.unlink()
+
+
+def ensure_data_dir(start: Path | None = None) -> Path:
+    """数据（out/ uploads/ settings.json）放哪。
+
+    优先放自己旁边 —— 整个文件夹拷走就是完整状态。但装在 `C:\\Program Files`、
+    只读 U 盘、或者被公司策略锁了目录时写不进去，那就退到用户的本地目录，
+    总比"上传报 500"强。返回真正用的目录（必要时已经把工作目录切过去了）。
+    """
+    start = Path(start or Path.cwd())
+    try:
+        _probe_writable(start)
+        return start
+    except OSError:
+        pass
+    fallback = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "AI Study"
+    _probe_writable(fallback)
+    os.chdir(fallback)          # serve 里的 out/ uploads/ 都是相对当前目录的
+    return fallback
+
 
 
 class Service:
@@ -160,6 +260,9 @@ def _storage_dir():
 
 def run(port: int | None = None, *, window: bool = True, debug: bool = False) -> int:
     """起服务 + 开窗口。返回进程退出码。"""
+    ensure_data_dir()                            # 只读目录里就把数据挪到用户目录去
+    if window and not ensure_webview2():
+        return 3                                 # 缺 WebView2：已经告诉人怎么办了
     picked, needs_own = choose_port(port or PREFERRED_PORT)
     service: Service | None = None
     if needs_own:
