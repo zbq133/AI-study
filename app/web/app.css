@@ -324,8 +324,11 @@ button.danger:disabled { opacity: .4; }
              background: var(--panel2); border: 1px solid var(--line);
              border-radius: 8px; padding: 10px 12px; }
 .sheetbar { display: flex; align-items: center; gap: 10px; margin-top: 18px;
-            padding-top: 14px; border-top: 1px solid var(--line); }
-.sheetbar .meta { color: var(--ok); }
+            padding-top: 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+/* 提示语自己占一行：挤在按钮旁边会把「保存」压成两行 */
+.sheetbar .meta { color: var(--ok); flex: 1 1 100%; order: 9; line-height: 1.65;
+                  font-size: 13px; color: var(--dim); }
+.sheetbar button { white-space: nowrap; flex: 0 0 auto; }
 
 /* ---- 主题色板 ------------------------------------------------------------
    界面里成体系的颜色都从这里取，改这一块就等于换一套皮。

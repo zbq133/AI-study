@@ -646,6 +646,16 @@ def test_layout_returns_blocks_with_ids(env, doc_pdf):
     assert len(first["bbox"]) == 4
 
 
+def test_settings_bar_does_not_squeeze_the_buttons(env):
+    """提示语挨着按钮会把「保存」压成两行（首启那条提示特别长）。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+    bar = css[css.index(".sheetbar {"):]
+    bar = bar[:bar.index("}")]
+    assert "flex-wrap: wrap" in bar
+    assert ".sheetbar button" in css and "white-space: nowrap" in css[css.index(".sheetbar button"):][:120]
+
+
 def test_first_run_walks_people_to_the_model_tab(env):
     """第一次打开、还没配密钥：别让人对着"还差模型配置"发呆，直接把设置打开。"""
     with TestClient(serve.app) as client:
