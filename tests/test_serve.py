@@ -688,6 +688,31 @@ def test_opening_an_old_lesson_points_the_source_column_at_its_own_pdf(env):
     assert "_srcSpec = null" in rs and "if (!data)" in rs
 
 
+def test_the_page_carries_the_app_icon(env):
+    """标签页图标跟 exe 是同一支羽毛笔 —— 别一边换了另一边还是默认图标。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        png = client.get("/static/icon-64.png")
+    assert 'rel="icon"' in html and "/static/icon-64.png" in html
+    assert png.status_code == 200
+    assert png.headers["content-type"] == "image/png"
+    assert png.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_the_windows_icon_has_every_small_size(env):
+    """ico 要自带 16/24/32 —— 只塞一张 256 让系统自己缩，任务栏上会糊成一团灰。"""
+    Image = pytest.importorskip("PIL.Image")
+    ico = Image.open(serve.WEB_DIR.parent / "desktop.ico")
+    assert {16, 24, 32, 48, 64, 128, 256} <= {s[0] for s in ico.info["sizes"]}
+    ico.size = (16, 16)
+    ico.load()
+    small = ico.convert("RGBA")
+    assert small.size == (16, 16)
+    # 16px 那层不能是空的，也不能整块不透明（必须仍是带透明角的圆角板）
+    alphas = [px[3] for px in small.getdata()]
+    assert max(alphas) == 255 and min(alphas) == 0
+
+
 def test_a_page_is_served_as_an_image(env, doc_pdf):
     """原文栏显示的是原 PDF 的页面图，不是 OCR 出来的字。"""
     with TestClient(serve.app) as client:

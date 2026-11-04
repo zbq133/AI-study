@@ -58,6 +58,8 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 WEB_TYPES = {".css": "text/css; charset=utf-8",
              ".js": "text/javascript; charset=utf-8",
              ".html": "text/html; charset=utf-8",
+             ".png": "image/png",
+             ".svg": "image/svg+xml",
              ".woff2": "font/woff2"}
 MAX_UPLOAD = 80 * 1024 * 1024
 REQUIRED = ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
