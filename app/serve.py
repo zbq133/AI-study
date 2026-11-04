@@ -309,10 +309,11 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
     job.result = {"file": str(out), "chapter": chapter, "lesson_id": rec["id"],
                   "sections": len(lesson.sections), "quiz": len(lesson.quiz),
                   "lesson": lesson.model_dump()}
-    # 思考等级被模型拒了要说出来 —— 界面上显示成"已按默认跑"，别假装生效了
-    note = getattr(llm, "reasoning_note", "")
-    if note:
-        job.result["reasoning_note"] = note
+    # 降级过的地方都要说出来：思考等级被模型拒了、或者代理连不上改成了直连
+    for field in ("reasoning_note", "proxy_note"):
+        note = getattr(llm, field, "")
+        if note:
+            job.result[field] = note
 
 
 # ---------------------------------------------------------------- 接口

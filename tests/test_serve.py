@@ -1169,6 +1169,27 @@ def test_a_refused_reasoning_effort_is_shown_to_the_user(env, doc_pdf, monkeypat
     assert "思考等级" in snap["result"]["reasoning_note"]
 
 
+def test_a_dead_env_proxy_is_reported_instead_of_crashing(env, doc_pdf, monkeypatch):
+    """环境变量里的代理连不上、改直连跑通之后，这句话要留在结果里给人看。"""
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+
+    class _DirectLLM(_FakeLLM):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.proxy_note = ("环境变量里的代理（http://127.0.0.1:7897）连不上，"
+                               "这次改成直连跑过去了。")
+
+    monkeypatch.setattr(serve, "LLM", _DirectLLM)
+    with TestClient(serve.app) as client:
+        doc_id, res = _parsed(client, doc_pdf)
+        title = res["sections"][0]["title"]
+        r = client.post("/api/lessons", json={"doc_id": doc_id, "chapter": title, "n_quiz": 1})
+        snap = _wait(client, r.json()["job_id"])
+    assert snap["state"] == "done"
+    assert "7897" in snap["result"]["proxy_note"]
+
+
 def test_style_tab_offers_three_tones_and_marks_the_default(env):
     """三档风格都要露出来，默认那颗要亮着。"""
     with TestClient(serve.app) as client:

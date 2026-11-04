@@ -257,7 +257,9 @@ $('#go').onclick = async () => {
       if (s.state === 'failed') { fail(s.error_info, s.error); return; }
       lesson = s.result.lesson || {};
       $('#goMeta').textContent = `${s.result.sections || 0} 节 · ${s.result.quiz || 0} 题 · ${s.elapsed}s`;
-      if (s.result.reasoning_note) $('#err').textContent = s.result.reasoning_note;
+      if (s.result.proxy_note || s.result.reasoning_note) {
+        $('#err').textContent = s.result.proxy_note || s.result.reasoning_note;
+      }
       renderLesson(lesson);
       renderSource();
       openId = s.result.lesson_id || '';

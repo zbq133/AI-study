@@ -1,7 +1,13 @@
+import types
+
 import pytest
+from openai import APIConnectionError
 from pydantic import BaseModel
 
-from app.errors import LLMBadJSON
+import httpx2
+
+from app import llm as llm_module
+from app.errors import LLMBadJSON, LLMUnavailable
 from app.llm import LLM
 
 
@@ -130,3 +136,95 @@ def test_reasoning_effort_survives_an_unrelated_error():
         llm.json("s", "u", Payload)
     assert "too long" in str(ei.value)
     assert llm.reasoning_effort == "high"   # 没被误摘
+
+
+# ---------- 环境变量里挂着死代理：连不上就直连一次 ----------
+#
+# 真实故障现场：用户环境里有 HTTP_PROXY=http://127.0.0.1:7897，可代理客户端没开。
+# httpx 默认吃这些变量，于是每个请求都往没人监听的端口撞 → APIConnectionError
+# → 界面上一句"连不上模型服务"，而浏览器、PowerShell 明明是通的。
+
+
+def _conn_error():
+    return APIConnectionError(
+        request=httpx2.Request("POST", "https://api.deepseek.com/chat/completions"))
+
+
+class _DeadCompletions:
+    def create(self, **kwargs):
+        raise _conn_error()
+
+
+class _DeadClient:
+    """连不上的客户端，长得跟 openai 客户端一样。"""
+
+    def __init__(self):
+        self.chat = types.SimpleNamespace(completions=_DeadCompletions())
+
+
+def _seq_make_client(clients):
+    """替身 make_client：按顺序发客户端，并把每次的 trust_env 记下来。"""
+    built = []
+    queue = list(clients)
+
+    def _make(base_url, api_key, timeout, trust_env=True):
+        built.append(trust_env)
+        return queue.pop(0)
+
+    return _make, built
+
+
+def _clear_proxy_env(monkeypatch):
+    for name in llm_module._PROXY_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_dead_proxy_in_env_falls_back_to_direct(monkeypatch):
+    """代理没开、变量还挂着：直连重试一次，并且照实告诉人。"""
+    _clear_proxy_env(monkeypatch)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    made, built = _seq_make_client([_DeadClient(), StubClient(['{"a": 7}'])])
+    monkeypatch.setattr(llm_module, "make_client", made)
+
+    llm = LLM(base_url="https://api.deepseek.com", api_key="sk-test", model="stub")
+    assert llm.json("s", "u", Payload).a == 7
+    assert built == [True, False]        # 第二次是不看环境变量的直连
+    assert "7897" in llm.proxy_note and "直连" in llm.proxy_note
+    assert llm.calls == 1                # 换直连那次不算两次成功调用
+
+
+def test_no_proxy_in_env_means_no_direct_retry(monkeypatch):
+    """环境里本来就没代理：连不上就是连不上，别拿直连当万能重试。"""
+    _clear_proxy_env(monkeypatch)
+    made, built = _seq_make_client([_DeadClient()])
+    monkeypatch.setattr(llm_module, "make_client", made)
+
+    llm = LLM(base_url="https://api.deepseek.com", api_key="sk-test", model="stub")
+    with pytest.raises(LLMUnavailable) as ei:
+        llm.json("s", "u", Payload)
+    assert ei.value.kind == "llm_down"
+    assert built == [True]
+    assert llm.proxy_note == ""
+
+
+def test_a_real_http_error_is_not_retried_without_proxy(monkeypatch):
+    """400/401 是"连上了但对方不收"，换直连没用。别放宽成两次调用。"""
+
+    class _BoomClient:
+        def __init__(self):
+            self.chat = types.SimpleNamespace(completions=self)
+
+        def create(self, **kwargs):
+            raise RuntimeError("400 Bad Request: model not found")
+
+    _clear_proxy_env(monkeypatch)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    made, built = _seq_make_client([_BoomClient()])
+    monkeypatch.setattr(llm_module, "make_client", made)
+
+    llm = LLM(base_url="https://api.deepseek.com", api_key="sk-test", model="stub")
+    with pytest.raises(Exception) as ei:
+        llm.json("s", "u", Payload)
+    assert "model not found" in str(ei.value)
+    assert built == [True]
+    assert llm.proxy_note == ""

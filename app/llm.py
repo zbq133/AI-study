@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 
-from openai import OpenAI
+import httpx2
+from openai import APIConnectionError, OpenAI
 from pydantic import ValidationError
 
 from .errors import BudgetExceeded, Cancelled, LLMBadJSON, wrap_llm_error
@@ -10,6 +12,31 @@ from .errors import BudgetExceeded, Cancelled, LLMBadJSON, wrap_llm_error
 #: 报错里出现这些词，才认为是"这个模型不认 reasoning_effort"，才降级重试。
 #: 别放宽：宽了会把真错误吞成两次调用。
 _REASONING_WORDS = ("reasoning", "thinking", "effort")
+
+#: httpx 默认读这些环境变量当代理。代理客户端没开、变量还挂着的时候，每个请求都会往
+#: 一个没人监听的本地端口撞，报出来是"连不上模型服务"，可浏览器和 PowerShell 明明能上 ——
+#: 这两天的那个故障就是这么来的，所以下面给它留了一次直连的机会。
+_PROXY_VARS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+               "ALL_PROXY", "all_proxy")
+
+
+def env_proxy() -> str:
+    """环境变量里挂着的那张代理，没有就是空串。顺序跟 httpx 一致：https 优先。"""
+    for name in _PROXY_VARS:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def make_client(base_url: str, api_key: str, timeout: float, trust_env: bool = True):
+    """建 openai 客户端。
+
+    `trust_env=False` = 不看环境变量里的代理，直接连。给的是自己建的 httpx2.Client，
+    所以超时要一起传 —— 否则 openai 那边的 timeout 和传输层对不上。
+    """
+    return OpenAI(base_url=base_url, api_key=api_key, timeout=timeout,
+                  http_client=httpx2.Client(timeout=timeout, trust_env=trust_env))
 
 
 def _mentions_reasoning(exc: Exception) -> bool:
@@ -27,13 +54,19 @@ class LLM:
     reasoning_effort 是界面上的"思考等级"（low/medium/high，空串=不传）。
     不是所有模型都认这个参数，所以第一次被拒时会**去掉它重试一次**，
     并把这个事实记在 `reasoning_note` 里 —— 界面上可以照实说，而不是假装生效了。
+
+    连不上时会看一眼环境变量里有没有代理：有就说明大概率是"代理客户端没开、变量还挂着"，
+    于是换成直连再试一次，把这件事记在 `proxy_note` 里。外部传进来的 client 不动它
+    （那是调用方自己的事，测试里也用得上）。
     """
 
     def __init__(self, base_url="", api_key="", model="", timeout=240.0, client=None,
                  max_calls=None, max_tokens=None, should_stop=None,
                  reasoning_effort=""):
-        self.client = client if client is not None else OpenAI(
-            base_url=base_url, api_key=api_key, timeout=timeout)
+        self.client = client if client is not None else make_client(base_url, api_key, timeout)
+        self._conn = (base_url, api_key, timeout)   # 只在自建客户端时才用来重建
+        self._own_client = client is None
+        self._tried_direct = False
         self.model = model
         self.calls = 0
         self.prompt_tokens = 0
@@ -43,6 +76,7 @@ class LLM:
         self.should_stop = should_stop
         self.reasoning_effort = (reasoning_effort or "").strip()
         self.reasoning_note = ""
+        self.proxy_note = ""
 
     @property
     def tokens(self) -> int:
@@ -56,15 +90,36 @@ class LLM:
         return kw
 
     def _create(self, msgs, temperature):
-        """发一次请求。思考等级被模型拒了就摘掉它再发一次。"""
+        """发一次请求。两种降级都在这儿：代理连不上就直连，思考等级被拒就摘掉它。"""
         try:
             return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
         except Exception as exc:
+            if self._retry_without_proxy(exc):
+                return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
             if not self.reasoning_effort or not _mentions_reasoning(exc):
                 raise
             self.reasoning_note = ("当前模型不接受「思考等级」，这次已经按默认跑过去了。")
             self.reasoning_effort = ""
             return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
+
+    def _retry_without_proxy(self, exc: Exception) -> bool:
+        """环境变量里挂着代理却连不上时，换成直连（只试一次）。
+
+        判据只有一条：`APIConnectionError` 且环境里确实有代理变量。别放宽 ——
+        4xx/5xx 是"连上了但对方不收"，换直连没用，重试只会多花一次钱。
+        """
+        if not self._own_client or self._tried_direct:
+            return False
+        if not isinstance(exc, APIConnectionError):
+            return False
+        proxy = env_proxy()
+        if not proxy:
+            return False
+        self._tried_direct = True
+        self.client = make_client(*self._conn, trust_env=False)
+        self.proxy_note = (f"环境变量里的代理（{proxy}）连不上，这次改成直连跑过去了。"
+                           "要一直直连就删掉 HTTP_PROXY / HTTPS_PROXY，或者把代理客户端开起来。")
+        return True
 
     def _check(self) -> None:
         """花钱之前问一次：被叫停了吗？快到上限了吗？"""
