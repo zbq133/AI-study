@@ -164,11 +164,12 @@ $('#up').onclick = async () => {
   }
 };
 
-async function afterParse(res) {
+async function afterParse(res, resetLesson = true) {
   renderSections(res);
   await loadLayout();
   $('#up').disabled = false;
   $('#go').disabled = false;
+  if (!resetLesson) return;      // 打开旧讲义时重解析：别把刚渲染好的讲义擦成提示
   $('#lessonBody').innerHTML = '<p class="hint">选好章节和题数，点「生成讲义」。' +
     `这份课件 ${res.pages} 页、${res.blocks} 块${res.ocr_pages.length ? '（其中 ' + res.ocr_pages.length + ' 页走 OCR）' : ''}。` +
     '</p>';
@@ -399,9 +400,9 @@ async function openLesson(id) {
       if (pj.job_id) {
         const snap = await waitJob(pj.job_id);
         if (snap.state !== 'done') throw new Error('parse failed');
-        await afterParse(snap.result);
+        await afterParse(snap.result, false);
       } else {
-        await afterParse(pj.result);
+        await afterParse(pj.result, false);
       }
       docId = record.doc_id;
       $('#upMeta').textContent = record.filename || '';

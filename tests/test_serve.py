@@ -855,6 +855,19 @@ def test_export_unknown_or_missing_lesson_says_so(doc_pdf, monkeypatch):
         assert client.get(f"/api/lessons/{lid}/export.pdf").status_code == 410
 
 
+def test_opening_an_old_lesson_does_not_wipe_it(env):
+    """打开旧讲义时会顺手重解析那份 PDF 接回原文 —— 但别把刚渲染的讲义擦成"选章节"提示。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    body = js[js.index("async function afterParse"):js.index("async function loadLayout")]
+    assert "resetLesson = true" in body
+    assert "if (!resetLesson) return;" in body
+    assert body.index("if (!resetLesson) return;") < body.index("$('#lessonBody').innerHTML")
+    old = js[js.index("async function openLesson"):js.index("function waitJob")]
+    assert "afterParse(snap.result, false)" in old
+    assert "afterParse(pj.result, false)" in old
+
+
 def test_delete_lesson_removes_the_file_too(doc_pdf, monkeypatch):
     for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
         monkeypatch.setenv(key, val)
