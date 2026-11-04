@@ -9,12 +9,12 @@
 
 ## 第一次
 
-    python -m venv .venv                # 需要 Python 3.12 / 3.13（见下）
+    python -m venv .venv                # 需要 Python 3.12（见下）
     .\.venv\Scripts\python.exe -m pip install -r requirements.txt
     copy .env.example .env              # 填 DeepSeek 的 key
 
 > 为什么不能用 3.15：`onnxruntime`（OCR 用的）还没有 3.15 的轮子，`pip install` 会
-> `ResolutionImpossible`。3.12 / 3.13 都能装。macOS / Linux 把 `.venv\Scripts\python.exe`
+> `ResolutionImpossible`。3.13 暂时装不上（rapidocr-onnxruntime 要求 <3.13）。macOS / Linux 把 `.venv\Scripts\python.exe`
 > 换成 `.venv/bin/python` 即可。
 
 ## 用客户端（不碰浏览器）

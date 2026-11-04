@@ -169,7 +169,7 @@ PPT 导出的整页图，文字层是空的。`ocr_page()` 用 RapidOCR 补，20
 一页 50–90 字，切成 3–4 个块后最长的连续片段就十几字。真跑时摘到的是「（仅在固体中传播）」「周期或频率只决定于波源的振动！」这种。
 **这不是模型偷懒**。想改善只能改校验语义（允许跨行拼接并标注），见 §5 P2-1。
 
-### 4.4 venv 必须是 Python 3.12/3.13
+### 4.4 venv 必须是 Python 3.12
 `onnxruntime` 没有 3.15 的轮子，用 3.15 建 venv 会 `ResolutionImpossible`。旧的 3.15 venv 改名留在 `.venv-315`，没删。
 
 ### 4.5 改文件别用 PowerShell 的 `Set-Content` / `Select-String -Replace`

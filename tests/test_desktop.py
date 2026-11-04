@@ -142,6 +142,18 @@ def test_run_starts_a_service_and_opens_a_window(monkeypatch):
     assert opened and opened[0].startswith("http://127.0.0.1:")
 
 
+def test_webview2_requirement_only_gates_windows(monkeypatch):
+    """WebView2 是 Windows 独有的：别的平台不该被"找不到 Edge 运行时"拦下。"""
+    # 先假装这台机器没装 WebView2，否则 Windows 上跑测试会因为"真的有"而永远通过
+    monkeypatch.setattr(desktop, "webview2_available", lambda dirs=None: False)
+
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
+    assert desktop.ensure_webview2(ask=lambda text: False) is True
+
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    assert desktop.ensure_webview2(ask=lambda text: False) is False
+
+
 def test_run_reports_a_service_that_never_comes_up(monkeypatch):
     monkeypatch.setattr(desktop, "choose_port", lambda p: (desktop.free_port(), True))
     monkeypatch.setattr(desktop, "wait_ready", lambda port, timeout=None: False)

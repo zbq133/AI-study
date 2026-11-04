@@ -13,7 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        # 只跑 3.12：rapidocr-onnxruntime 的元数据写着 Requires-Python <3.13，
+        # 3.13 上 pip 直接解析不出可安装版本（不是代码不兼容，是发行版还没跟上）。
+        python-version: ["3.12"]
 
     steps:
       - uses: actions/checkout@v4

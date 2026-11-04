@@ -13,5 +13,6 @@ python-multipart>=0.0.9
 httpx>=0.27
 # 图片型课件（PPT 导出的整页图）的文字层兜底。
 # 它依赖 onnxruntime，而 onnxruntime 还没有 Python 3.15 的轮子——
-# 项目环境请用 3.12/3.13，用 3.15 建 venv 会直接装不上。
+# 项目环境请用 3.12：它的元数据写着 Requires-Python <3.13，3.13 上 pip 找不到可装的版本；
+# 3.15 更不行（onnxruntime 还没有 3.15 的轮子）。
 rapidocr-onnxruntime>=1.4

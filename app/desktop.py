@@ -130,6 +130,10 @@ def _say(text: str, title: str = "AI Study") -> None:
 
 def ensure_webview2(*, ask=None, open_url=None) -> bool:
     """没有运行时就告诉人怎么办，并可以帮着打开下载页。返回能不能继续开窗。"""
+    # WebView2 是 Windows 独有的；Linux/macOS 上 pywebview 会用 GTK/Qt/Cocoa，
+    # 不该拿"找不到 Edge 运行时"把别的平台的窗口拦下来。
+    if sys.platform != "win32":
+        return True
     if webview2_available():
         return True
     opener = open_url or webbrowser.open
