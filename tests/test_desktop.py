@@ -212,6 +212,7 @@ def test_webview2_is_found_by_looking_for_the_runtime_exe(tmp_path, monkeypatch)
 
 def test_missing_webview2_tells_the_user_what_to_do(monkeypatch):
     """缺运行时不能"双击没反应"：要弹话，还要能帮着打开下载页。"""
+    monkeypatch.setattr(desktop.sys, "platform", "win32")   # WebView2 只关 Windows 的事
     monkeypatch.setattr(desktop, "webview2_available", lambda dirs=None: False)
     said, opened = [], []
     ok = desktop.ensure_webview2(ask=lambda text: said.append(text) or True,
@@ -222,6 +223,7 @@ def test_missing_webview2_tells_the_user_what_to_do(monkeypatch):
 
 
 def test_webview2_present_means_no_nagging(monkeypatch):
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
     monkeypatch.setattr(desktop, "webview2_available", lambda dirs=None: True)
     assert desktop.ensure_webview2(ask=lambda t: pytest.fail("不该弹"), open_url=None) is True
 
