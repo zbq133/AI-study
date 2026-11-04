@@ -109,6 +109,7 @@ def test_service_comes_up_and_goes_down():
 def test_open_window_passes_the_right_arguments(monkeypatch):
     calls = {}
     fake = types.SimpleNamespace()
+    fake.settings = {"ALLOW_DOWNLOADS": False}
 
     def create_window(title, url, **kw):
         calls["window"] = dict(title=title, url=url, **kw)
@@ -127,6 +128,8 @@ def test_open_window_passes_the_right_arguments(monkeypatch):
     assert calls["start"]["private_mode"] is False     # 关掉隐私模式，主题/字号才留得住
     assert calls["start"]["storage_path"].endswith("webview")
     assert calls["start"]["gui"] == "edgechromium"
+    # 默认是 False：客户端里点「导出讲义」会被静默 cancel，看着像按钮坏了
+    assert fake.settings["ALLOW_DOWNLOADS"] is True
 
 
 def test_run_starts_a_service_and_opens_a_window(monkeypatch):

@@ -125,6 +125,14 @@ def open_window(url: str, title: str = "AI Study", debug: bool = False) -> None:
     """开原生窗口。关掉窗口这个调用才返回。"""
     import webview  # 只有客户端模式才需要它，命令行/测试不受影响
 
+    # 客户端里「导出讲义」是一次下载。pywebview 默认把下载直接 cancel（ALLOW_DOWNLOADS=False），
+    # 表现是"点了按钮什么都不发生" —— 用户只会以为导不出来。开了之后 WebView2 会弹系统的
+    # 另存为对话框，默认目录就是"下载"。
+    try:
+        webview.settings["ALLOW_DOWNLOADS"] = True
+    except Exception:      # 老版本没有这个 settings 字典，那就只能靠浏览器自己接管
+        pass
+
     webview.create_window(
         title,
         url,
