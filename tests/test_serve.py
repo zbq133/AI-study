@@ -641,6 +641,32 @@ def test_layout_returns_blocks_with_ids(env, doc_pdf):
     assert first["id"] and first["text"]
     assert first["kind"] in {"heading", "para", "list", "formula", "table",
                              "figure", "caption"}
+    # 前端要把 bbox 换算成图片上的百分比：页面尺寸和矩形都得给
+    assert pages[0]["w"] > 0 and pages[0]["h"] > 0
+    assert len(first["bbox"]) == 4
+
+
+def test_a_page_is_served_as_an_image(env, doc_pdf):
+    """原文栏显示的是原 PDF 的页面图，不是 OCR 出来的字。"""
+    with TestClient(serve.app) as client:
+        doc_id, _ = _parsed(client, doc_pdf)
+        r = client.get(f"/api/docs/{doc_id}/page/1.png")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/png"
+        assert r.content.startswith(b"\x89PNG")
+        # 同一页第二次走缓存，不该再算一遍
+        again = client.get(f"/api/docs/{doc_id}/page/1.png")
+        assert again.content == r.content
+        assert client.get(f"/api/docs/{doc_id}/page/9.png").status_code == 404
+
+
+def test_page_image_needs_parsed_doc(env, doc_pdf):
+    with TestClient(serve.app) as client:
+        up = _upload(client, doc_pdf).json()
+        doc_id = up["doc_id"]
+        # 传了但还没解析：409（"先调 /parse"），不是 404
+        assert client.get(f"/api/docs/{doc_id}/page/1.png").status_code == 409
+        assert client.get("/api/docs/nope/page/1.png").status_code == 404
 
 
 def test_layout_page_filter_keeps_only_the_asked_pages(env, doc_pdf):
@@ -1147,6 +1173,59 @@ def test_source_column_is_fetched_only_for_the_pages_in_view(env):
     body = js[js.index("function renderSource"):js.index("function paintSource")]
     assert "?pages=${spec}" in body
     assert "refPages()" in body
+
+
+def test_the_source_column_shows_the_real_pages(env):
+    """原文栏要摊原 PDF 的页面图，不是把 OCR 出来的字再排一遍。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+        css = client.get("/static/app.css").text
+        html = client.get("/").text
+    body = js[js.index("function paintSource"):js.index("function paintHighlight")]
+    assert "/page/${p.page}.png" in body          # 每页一张图
+    assert "hl-layer" in body                     # 高亮层贴在图上面
+    assert "noimg" in body                        # 图挂了退回文字版
+    # 页面尺寸必须来自服务端（每份 PDF 都可能不一样），不能写死 A4
+    assert 'data-w="${p.w' in body and 'data-h="${p.h' in body
+    assert ".hlbox" in css and ".pgimg > img" in css
+
+
+def test_clicking_a_ref_highlights_by_geometry(env):
+    """高亮按 bbox 换算成百分比贴，别指望文字块还能对上。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    body = js[js.index("function paintHighlight"):js.index("closest('.ref')")]
+    assert "b.bbox" in body
+    # 四个边都要按原页尺寸算：只查"出现了 100"会被 `left:0%` 骗过去
+    assert "left:${(x0 / w) * 100}%" in body
+    assert "top:${(y0 / h) * 100}%" in body
+    assert "/ w) * 100}%" in body and "/ h) * 100}%" in body
+    assert "hlbox" in body
+    click = js[js.index("closest('.ref')"):js.index("设置：左下角")]
+    assert "paintHighlight(ids)" in click
+
+
+def test_settings_do_not_close_when_you_click_outside(env):
+    """设置里有输入框和下拉：手滑点到旁边就整页关掉太亏，只认 ✕ 和 Esc。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+    assert "e.target === $('#setModal')" not in js
+    assert "$('#setModal').addEventListener('click'" not in js
+    tail = js[js.index("$('#setClose').onclick = closeSettings"):]
+    tail = tail[:tail.index("})") + 2]
+    assert "Escape" in tail
+
+
+def test_settings_point_people_at_the_api_key_page(env):
+    """没有密钥的人到设置里就卡住了 —— 给一条能点的路，别让人自己猜。"""
+    with TestClient(serve.app) as client:
+        html = client.get("/").text
+        css = client.get("/static/app.css").text
+    pane = html[html.index('data-pane="model"'):html.index('data-pane="style"')]
+    assert 'id="getApi"' in pane
+    assert "platform.deepseek.com" in pane
+    assert 'target="_blank"' in pane and "noopener" in pane
+    assert ".getkey" in css
 
 
 def test_a_refused_reasoning_effort_is_shown_to_the_user(env, doc_pdf, monkeypatch):

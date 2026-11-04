@@ -626,3 +626,31 @@ Story 会把整个雅黑塞进 PDF（19 MB），一份讲义就 19 MB，导十�
 那是给"刚上传完还没生成"用的。可是 `openLesson()` 在服务重启后也会调 `afterParse()`
 （从磁盘把 PDF 接回来、好让出处还能点），结果讲义先渲染、随即被提示覆盖，看着像"打不开"。
 加了 `afterParse(res, resetLesson = true)`，只有真正上传/重解析的路径才重置讲义。
+## 2026-11-04 补记：原文栏摊真页面、获取 API、点外面不关
+
+### 原文栏要看原 PDF，不是 OCR 出来的字
+
+文字层是从 PDF 里抽的（扫描件还要过 OCR），排成一行行代码块给人看，图表、公式、
+版面关系全丢了 —— 学生对照原文时会发现"讲义说的这句话在原文里找不到"，因为它本来就在图里。
+
+改成服务端按页渲图：`GET /api/docs/{doc_id}/page/{pno}.png`（PyMuPDF，默认 120 dpi，
+按 `doc_id + 页码 + dpi` 缓存在 `out/pages/`）。前端每页一张 `<img>`，高亮是贴在图上面的
+一层绝对定位 div，位置由 `bbox / 页面尺寸` 换算成百分比。
+
+为此 `DocIR` 多存了 `page_sizes`（每页纸面 pt 宽高），`/layout` 也把 `w`/`h` 和每块的
+`bbox` 一起给出来 —— **别在 JS 里写死 A4**，同一份 PDF 里也有横版页。
+
+文字层没有删：图片加载失败（原文件被挪走）时 `onerror` 给 `.pg` 加 `noimg`，CSS 把图
+藏起来、把文字版露出来，至少"点出处"还有个靶子。
+
+### 「获取 API」这颗按钮
+
+没有密钥的人在设置里就卡住了，之前只有一句"在 .env 里填"。加一条指向
+`platform.deepseek.com/api_keys` 的链接（`target="_blank"` + `rel="noopener noreferrer"`）。
+客户端里 pywebview 的 `OPEN_EXTERNAL_LINKS_IN_BROWSER` 默认是开的，所以点了会走系统浏览器。
+
+### 点弹层外面不该关掉设置
+
+原来 `.modal` 上挂着 `e.target === modal → closeSettings()`。设置里有输入框和下拉，
+手一滑点到旁边，填了一半的密钥就没了。删掉这条，只留 ✕ 和 Esc —— **Esc 只在弹层开着时
+才响应**，别让它顺手把别的东西也关了。

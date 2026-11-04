@@ -402,6 +402,7 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr", should_stop=None)
         blocks=blocks,
         toc=toc,
         ocr_pages=ocr_pages,
+        page_sizes={pno: (round(w, 2), round(h, 2)) for pno, _o, w, h in pages},
     )
 
 

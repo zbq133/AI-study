@@ -122,7 +122,7 @@ app/
   export.py   320  讲义→PDF：LaTeX 兜底成 Unicode、Markdown 子集转 HTML、PyMuPDF Story 排版
                    · 字体塞 Archive + @font-face，subsets_fonts 后 19 MB→84 KB
                    · 别用临时文件中转：Windows 上句柄没放，19 MB 垃圾删不掉 → 写 BytesIO
-  serve.py    760  FastAPI：18 端点、线程池任务、SSE 进度、日志、探活
+  serve.py    790  FastAPI：19 端点、线程池任务、SSE 进度、日志、探活、按页渲图（/page/N.png）
   desktop.py  218  客户端外壳：后台起 uvicorn + pywebview 原生窗口；端口复用/让位
                    · _ensure_streams()：窗口版 exe 没有控制台，sys.stdout 是 None
   cli.py       98  命令行入口

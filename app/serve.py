@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
+import pymupdf
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -456,10 +457,40 @@ async def layout(doc_id: str, pages: str = "") -> dict:
     for pno in sorted(per):
         if want is not None and pno not in want:
             continue
-        out.append({"page": pno,
+        w, h = ir.page_sizes.get(pno, (595.0, 842.0))
+        out.append({"page": pno, "w": w, "h": h,
                     "blocks": [{"id": b.id, "kind": b.kind, "text": b.text,
-                                "level": b.level} for b in per[pno]]})
+                                "level": b.level, "bbox": list(b.bbox) if b.bbox else None}
+                               for b in per[pno]]})
     return {"doc_id": doc_id, "pages": out}
+
+
+@app.get("/api/docs/{doc_id}/page/{pno}.png")
+async def page_image(doc_id: str, pno: int, dpi: int = 120) -> FileResponse:
+    """把原 PDF 的第 pno 页渲染成图片 —— 原文栏显示的是真页面，不是 OCR 出来的字。
+
+    同一页只渲染一次（按 doc_id + 页码 + dpi 存在 out/pages 下）：翻来翻去不该重算。
+    """
+    doc = DOCS.get(doc_id)
+    if doc is None:
+        raise HTTPException(404, "没有这个 doc_id，先上传")
+    ir = doc["ir"]
+    if ir is None:
+        raise HTTPException(409, "还没解析，先调 /parse")
+    if pno < 1 or pno > ir.page_count:
+        raise HTTPException(404, "没有这一页")
+    dpi = max(60, min(240, dpi))
+    out = OUT_DIR / "pages" / doc_id / f"p{pno}@{dpi}.png"
+    if not out.is_file():
+        try:
+            with pymupdf.open(str(doc["path"])) as pdf:
+                pix = pdf[pno - 1].get_pixmap(dpi=dpi)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                pix.save(str(out))
+        except Exception as exc:                       # noqa: BLE001
+            raise HTTPException(410, f"这一页渲染不出来：{exc}") from exc
+    return FileResponse(out, media_type="image/png",
+                        headers={"cache-control": "private, max-age=600"})
 
 
 class LessonReq(BaseModel):

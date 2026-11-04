@@ -57,6 +57,8 @@ class DocIR(BaseModel):
     #: 走了 OCR 的页码。这些页的文字是识别出来的，公式与上下标不可信，
     #: 引用校验、讲义措辞都该知道这件事——别让下游把它当原生文字层用。
     ocr_pages: list[int] = []
+    #: 每页的纸面尺寸（pt）。前端要把 bbox 换算成图片上的百分比，得知道原页多大。
+    page_sizes: dict[int, tuple[float, float]] = {}
 
 
 class Section(BaseModel):

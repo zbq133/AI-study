@@ -252,9 +252,20 @@ button.danger:disabled { opacity: .4; }
 .katex-display { margin: 10px 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 .katex { font-size: 1.02em; }
 
-/* 原文 */
+/* 原文：显示的是原 PDF 的页面图，文字层只在图片拿不到时兜底 */
 .pg { margin-bottom: 22px; }
 .pgno { font-size: 11px; color: var(--dim3); letter-spacing: .1em; margin-bottom: 6px; }
+.pgimg { position: relative; border: 1px solid var(--line); border-radius: 4px;
+         overflow: hidden; background: #fff; box-shadow: 0 1px 6px rgba(15, 25, 40, .08); }
+.pgimg > img { display: block; width: 100%; height: auto; }
+.hl-layer { position: absolute; inset: 0; pointer-events: none; }
+.hlbox { position: absolute; background: #ffe066; opacity: .42;
+         box-shadow: 0 0 0 1px rgba(200, 150, 0, .35); border-radius: 2px;
+         animation: hl-in .18s ease-out; }
+@keyframes hl-in { from { opacity: 0; } to { opacity: .42; } }
+.pgtext { display: none; padding: 6px 0; }
+.pg.noimg .pgimg > img, .pg.noimg .hl-layer { display: none; }
+.pg.noimg .pgtext { display: block; }
 .blk { font-size: 13px; line-height: 1.65; color: var(--dim); padding: 3px 8px;
        border-left: 2px solid transparent; border-radius: 3px; transition: background .2s; }
 .blk.k-heading { color: var(--fg2); font-weight: 600; margin-top: 10px; }
@@ -299,6 +310,11 @@ button.danger:disabled { opacity: .4; }
 .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
 .field .src { display: block; font-size: 11.5px; color: var(--dim3); font-style: normal;
               margin-top: 5px; line-height: 1.5; }
+/* 「获取 API」这一行：按钮和说明同一行，窄了自动折 */
+.getkey { margin: 0 0 15px; font-size: 12.5px; color: var(--dim);
+          display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.getkey a.ghost { text-decoration: none; padding: 5px 12px; font-size: 12.5px; }
+.getkey .src { display: inline; font-size: 11.5px; color: var(--dim3); }
 .seg { display: flex; gap: 8px; flex-wrap: wrap; }
 .seg button { padding: 6px 14px; font-size: 12.5px; color: var(--dim);
               background: var(--panel); border: 1px solid var(--line2);

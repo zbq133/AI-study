@@ -650,11 +650,42 @@ function paintSource() {
     return;
   }
   $('#srcMeta').textContent = `p${shown[0].page}–${shown[shown.length - 1].page}`;
+  // 显示的是原 PDF 的页面图，不是识别出来的字：扫描件、公式、图表都跟纸面一致。
+  // 图片拿不到（原文件被挪走了）才退回文字版，让"点出处"至少还有个靶子。
   $('#sourceBody').innerHTML = shown.map(p =>
-    `<div class="pg"><div class="pgno">PAGE ${p.page}</div>` +
+    `<div class="pg" data-page="${p.page}">` +
+    `<div class="pgno">PAGE ${p.page}</div>` +
+    `<div class="pgimg" data-w="${p.w || 595}" data-h="${p.h || 842}">` +
+    `<img src="/api/docs/${encodeURIComponent(docId)}/page/${p.page}.png" loading="lazy"` +
+    ` alt="第 ${p.page} 页" onerror="this.closest('.pg').classList.add('noimg')">` +
+    `<div class="hl-layer"></div>` +
+    `<div class="pgtext">` +
     p.blocks.map(b =>
       `<div class="blk k-${b.kind}" data-id="${esc(b.id)}">${esc(b.text)}</div>`).join('') +
-    '</div>').join('');
+    '</div></div></div>').join('');
+}
+
+/** 把选中那几条出处的矩形贴到页面图上（bbox 是 pt，按原页尺寸换成百分比）。 */
+function paintHighlight(ids) {
+  for (const layer of document.querySelectorAll('.hl-layer')) layer.innerHTML = '';
+  if (!layout || !layout.pages || !ids.length) return null;
+  let first = null;
+  for (const p of layout.pages) {
+    const pg = document.querySelector(`.pg[data-page="${p.page}"]`);
+    if (!pg) continue;
+    const box = pg.querySelector('.pgimg');
+    const w = Number(box.dataset.w) || 595, h = Number(box.dataset.h) || 842;
+    const hits = p.blocks.filter(b => ids.includes(b.id) && b.bbox);
+    const layer = pg.querySelector('.hl-layer');
+    layer.innerHTML = hits.map(b => {
+      const [x0, y0, x1, y1] = b.bbox;
+      const style = `left:${(x0 / w) * 100}%;top:${(y0 / h) * 100}%;` +
+                    `width:${((x1 - x0) / w) * 100}%;height:${((y1 - y0) / h) * 100}%`;
+      return `<div class="hlbox" style="${style}"></div>`;
+    }).join('');
+    if (!first && hits.length) first = layer.firstElementChild;
+  }
+  return first;
 }
 
 $('#lesson').addEventListener('click', e => {
@@ -662,13 +693,8 @@ $('#lesson').addEventListener('click', e => {
   if (!btn) return;
   if (srcCollapsed()) setSourceCollapsed(false);   // 收起来了就先展开，不然跳过去看不见
   const ids = (btn.dataset.ids || '').split(',').filter(Boolean);
-  document.querySelectorAll('.blk.hl').forEach(x => x.classList.remove('hl'));
-  if (!ids.length) return;
-  const first = document.querySelector(`.blk[data-id="${ids[0]}"]`);
-  if (!first) return;
-  ids.forEach(id =>
-    document.querySelectorAll(`.blk[data-id="${id}"]`).forEach(x => x.classList.add('hl')));
-  first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const first = paintHighlight(ids);
+  if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
 });
 
 /* 页面一打开就把历史列出来 —— 不依赖用户先传 PDF。 */
@@ -816,11 +842,10 @@ function closeSettings() {
 
 $('#gear').onclick = openSettings;
 $('#setClose').onclick = closeSettings;
-$('#setModal').addEventListener('click', e => {
-  if (e.target === $('#setModal')) closeSettings();   // 点空白处关掉
-});
+// 点弹层外面的空白不关：设置里有输入框和下拉，手一滑点到旁边就整页丢失太糟
+// （原来的 e.target === modal 判断干的就是这个）。要关就用 ✕ 或 Esc。
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeSettings();
+  if (e.key === 'Escape' && !$('#setModal').classList.contains('hide')) closeSettings();
 });
 
 async function saveSettings(extra) {
