@@ -1,10 +1,8 @@
 import types
 
 import pytest
-from openai import APIConnectionError
+from openai import APIConnectionError, DefaultHttpxClient, OpenAI
 from pydantic import BaseModel
-
-import httpx2
 
 from app import llm as llm_module
 from app.errors import LLMBadJSON, LLMUnavailable
@@ -146,8 +144,9 @@ def test_reasoning_effort_survives_an_unrelated_error():
 
 
 def _conn_error():
-    return APIConnectionError(
-        request=httpx2.Request("POST", "https://api.deepseek.com/chat/completions"))
+    req = DefaultHttpxClient().build_request(
+        "POST", "https://api.deepseek.com/chat/completions")
+    return APIConnectionError(request=req)
 
 
 class _DeadCompletions:
@@ -228,3 +227,58 @@ def test_a_real_http_error_is_not_retried_without_proxy(monkeypatch):
     assert "model not found" in str(ei.value)
     assert built == [True]
     assert llm.proxy_note == ""
+
+
+def test_make_client_uses_openai_default_http_client():
+    """不直接 import httpx2：通过 openai 自带 DefaultHttpxClient 控制 trust_env。"""
+    c = llm_module.make_client("https://api.deepseek.com", "sk-test", 12.0, trust_env=False)
+    assert isinstance(c, OpenAI)
+    assert c._client.trust_env is False
+
+
+def test_empty_choices_retries_and_raises_bad_json_instead_of_index_error():
+    class _EmptyResp:
+        choices = []
+        usage = _Usage()
+
+    class _SeqCompletions(_Completions):
+        def create(self, **kwargs):
+            self.last_messages = kwargs.get("messages")
+            i = min(self.calls, len(self.seq) - 1)
+            self.calls += 1
+            val = self.seq[i]
+            return _EmptyResp() if val is None else _Resp(val)
+
+    stub = StubClient([])
+    stub.chat.completions = _SeqCompletions([None, '{"a": 3}'])
+    assert LLM(client=stub, model="stub").json("s", "u", Payload).a == 3
+    assert stub.chat.completions.calls == 2
+
+    always_empty = StubClient([])
+    always_empty.chat.completions = _SeqCompletions([None])
+    with pytest.raises(LLMBadJSON) as ei:
+        LLM(client=always_empty, model="stub").json("s", "u", Payload, retries=1)
+    assert "没有 choices" in str(ei.value)
+
+
+def test_json_strips_markdown_code_fence():
+    stub = StubClient(['```json\n{"a": 42}\n```'])
+    llm = LLM(client=stub, model="stub")
+    assert llm.json("s", "u", Payload).a == 42
+    assert llm.calls == 1
+
+
+def test_dead_proxy_then_refused_reasoning_effort_degrades_both(monkeypatch):
+    _clear_proxy_env(monkeypatch)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+    picky = StubClient([])
+    picky.chat.completions = _PickyCompletions(['{"a": 8}'])
+    made, built = _seq_make_client([_DeadClient(), picky])
+    monkeypatch.setattr(llm_module, "make_client", made)
+
+    llm = LLM(base_url="https://api.deepseek.com", api_key="sk-test",
+              model="stub", reasoning_effort="high")
+    assert llm.json("s", "u", Payload).a == 8
+    assert built == [True, False]
+    assert llm.proxy_note and llm.reasoning_note
+    assert llm.reasoning_effort == ""

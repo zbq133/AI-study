@@ -239,7 +239,8 @@ def _bullets(lessons, limit: int = 10) -> list[str]:
     return out[:limit]
 
 
-def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None, style=""):
+def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None, style="", *,
+                 section_n=None):
     """跑完整条流水线。
 
     on_step 每推进一格调一次，收到 {"stage": ..., ...}：outline / section /
@@ -253,7 +254,7 @@ def build_lesson(llm, ir, chapter, n_quiz=5, on_step=None, style=""):
 
     ptext = page_text_map(ir)
     blocks = page_block_map(ir)
-    sections = select_chapter(build_sections(ir), chapter)
+    sections = select_chapter(build_sections(ir), chapter, index=section_n)
     if not sections:
         raise ChapterNotFound(
             f"没找到章节：{chapter}",

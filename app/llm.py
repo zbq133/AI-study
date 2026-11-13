@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
-import httpx2
-from openai import APIConnectionError, OpenAI
+from openai import APIConnectionError, DefaultHttpxClient, OpenAI
 from pydantic import ValidationError
 
 from .errors import BudgetExceeded, Cancelled, LLMBadJSON, wrap_llm_error
@@ -32,16 +32,26 @@ def env_proxy() -> str:
 def make_client(base_url: str, api_key: str, timeout: float, trust_env: bool = True):
     """建 openai 客户端。
 
-    `trust_env=False` = 不看环境变量里的代理，直接连。给的是自己建的 httpx2.Client，
-    所以超时要一起传 —— 否则 openai 那边的 timeout 和传输层对不上。
+    `trust_env=False` = 不看环境变量里的代理，直接连。使用 openai 自带的
+    `DefaultHttpxClient`，兼容 1.x/2.x（httpx）与 3.x（httpx2），并把超时一起传入。
     """
     return OpenAI(base_url=base_url, api_key=api_key, timeout=timeout,
-                  http_client=httpx2.Client(timeout=timeout, trust_env=trust_env))
+                  http_client=DefaultHttpxClient(timeout=timeout, trust_env=trust_env))
 
 
 def _mentions_reasoning(exc: Exception) -> bool:
     text = f"{exc}".lower()
     return any(w in text for w in _REASONING_WORDS)
+
+
+_FENCE = re.compile(r"^\s*```(?:json)?\s*\r?\n?(.*?)\r?\n?```\s*$",
+                    re.DOTALL | re.IGNORECASE)
+
+
+def _strip_fence(text: str) -> str:
+    """剥掉模型偶尔多套的 ```json ... ``` 围栏，避免白白重试一次。"""
+    m = _FENCE.match(text)
+    return m.group(1).strip() if m else text
 
 
 class LLM:
@@ -95,7 +105,10 @@ class LLM:
             return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
         except Exception as exc:
             if self._retry_without_proxy(exc):
-                return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
+                try:
+                    return self.client.chat.completions.create(**self._kwargs(msgs, temperature))
+                except Exception as exc2:
+                    exc = exc2
             if not self.reasoning_effort or not _mentions_reasoning(exc):
                 raise
             self.reasoning_note = ("当前模型不接受「思考等级」，这次已经按默认跑过去了。")
@@ -150,9 +163,16 @@ class LLM:
             if usage is not None:
                 self.prompt_tokens += getattr(usage, "prompt_tokens", 0) or 0
                 self.completion_tokens += getattr(usage, "completion_tokens", 0) or 0
-            txt = (resp.choices[0].message.content or "").strip()
+            choices = getattr(resp, "choices", None) or []
+            msg = getattr(choices[0], "message", None) if choices else None
+            if msg is None:
+                last = ValueError("模型返回为空（没有 choices）")
+                msgs.append({"role": "user",
+                             "content": "上一次响应为空，请直接输出完整 JSON，不要任何解释。"})
+                continue
+            txt = (getattr(msg, "content", None) or "").strip()
             try:
-                return model_cls.model_validate(json.loads(txt))
+                return model_cls.model_validate(json.loads(_strip_fence(txt)))
             except (ValidationError, json.JSONDecodeError, TypeError) as exc:
                 last = exc
                 msgs.append({"role": "assistant", "content": txt})

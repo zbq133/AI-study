@@ -92,8 +92,14 @@ def latex_to_text(tex: str) -> str:
             continue
         m = re.match(r"\\([A-Za-z]+)", tex[i:])
         if not m:
-            out.append(tex[i:(i + 2)])
-            i += 2
+            ch = tex[i + 1] if i + 1 < len(tex) else ""
+            if ch in (",", ";", " "):
+                out.append(" ")
+            elif ch in ("%", "&", "#"):
+                out.append(ch)
+            else:
+                out.append(tex[i:(i + 2)])
+            i += 2 if ch else 1
             continue
         name = m.group(1)
         i += len(m.group(0))
@@ -115,10 +121,8 @@ def latex_to_text(tex: str) -> str:
             out.append(_GREEK[name])
         elif name in _OPS:
             out.append(_OPS[name])
-        elif name in (",", ";", " ", "quad", "qquad"):
+        elif name in ("quad", "qquad"):
             out.append(" ")
-        elif name in ("%", "&", "#"):
-            out.append(name)
         else:
             out.append(name)          # 认不出就留名字，别把内容吞掉
     s = "".join(out)
@@ -132,12 +136,16 @@ def latex_to_text(tex: str) -> str:
 
 _INLINE_MATH = re.compile(r"\$([^$\n]{1,200})\$")
 _DISPLAY_MATH = re.compile(r"\$\$([^$]{1,600})\$\$")
+_INLINE_PAREN = re.compile(r"\\\(([^\n]{1,200}?)\\\)")
+_DISPLAY_BRACKET = re.compile(r"\\\[(.{1,600}?)\\\]", re.DOTALL)
 
 
 def _math(text: str) -> str:
-    """把 `$…$` / `$$…$$` 换成转义过的可读文本（先转义再包标签，避免注入）。"""
+    """把 `$…$` / `$$…$$` 与 `\\(…\\)` / `\\[…\\]` 换成可读文本。"""
     text = _DISPLAY_MATH.sub(lambda m: "\n" + latex_to_text(m.group(1)) + "\n", text)
-    return _INLINE_MATH.sub(lambda m: latex_to_text(m.group(1)), text)
+    text = _DISPLAY_BRACKET.sub(lambda m: "\n" + latex_to_text(m.group(1)) + "\n", text)
+    text = _INLINE_MATH.sub(lambda m: latex_to_text(m.group(1)), text)
+    return _INLINE_PAREN.sub(lambda m: latex_to_text(m.group(1)), text)
 
 
 # ---------------------------------------------------------------- Markdown → HTML

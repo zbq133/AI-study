@@ -96,3 +96,16 @@ def test_font_lookup_returns_a_file_when_it_finds_one():
     if font is None:
         return                    # 没装中文字体的机器上，导出会退回 sans-serif，不是失败
     assert Path(font).is_file()
+
+
+def test_latex_to_text_handles_escaped_spaces_and_punctuation():
+    assert latex_to_text(r"343\ \text{m/s}") == "343 m/s"
+    assert latex_to_text(r"a\,b\;c") == "a b c"
+    assert latex_to_text(r"50\% \& \#1") == "50% & #1"
+
+
+def test_md_to_html_converts_paren_and_bracket_math():
+    html = md_to_html(r"行内 \(\lambda = u T\) 与独立 \[\alpha + \beta\]")
+    assert "λ = u T" in html
+    assert "α + β" in html
+    assert r"\(" not in html and r"\[" not in html

@@ -91,3 +91,29 @@ def test_every_section_is_listed_not_just_the_first_twenty(capsys, monkeypatch):
     assert rc == 0
     assert "第25章" in out
     assert "前 20 条" not in out
+
+
+def test_cli_numeric_choice_forwards_section_n(monkeypatch):
+    """CLI 按序号选到同名小节时，必须把 section_n 一起传进 build_lesson。"""
+    ir = DocIR(doc_id="d1", filename="t.pdf", page_count=2, blocks=[
+        Block(id="b1", kind="heading", text="第1章", page=1, level=1, section_path=["第1章"]),
+        Block(id="b2", kind="heading", text="小结", page=1, level=2, section_path=["第1章", "小结"]),
+        Block(id="b3", kind="para", text=QUOTE, page=1, section_path=["第1章", "小结"]),
+        Block(id="b4", kind="heading", text="第2章", page=2, level=1, section_path=["第2章"]),
+        Block(id="b5", kind="heading", text="小结", page=2, level=2, section_path=["第2章", "小结"]),
+        Block(id="b6", kind="para", text=QUOTE, page=2, section_path=["第2章", "小结"]),
+    ])
+    _setup(monkeypatch)
+    monkeypatch.setattr(cli, "extract_ir", lambda path: ir)
+    captured = {}
+
+    def fake_build(llm, doc_ir, chapter, n, **kwargs):
+        captured["chapter"] = chapter
+        captured.update(kwargs)
+        raise ChapterNotFound("stop early for test")
+
+    monkeypatch.setattr(cli, "build_lesson", fake_build)
+    monkeypatch.setattr(sys, "argv", ["app.cli", "t.pdf", "4", "1"])
+    rc = cli.main()
+    assert rc == 5
+    assert captured == {"chapter": "小结", "section_n": 4}

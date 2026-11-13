@@ -62,11 +62,13 @@ def main() -> int:
         print('  python -m app.cli "<pdf路径>" "第1章" 5')
         return 0
 
+    section_n: int | None = None
     if chapter.isdigit():                      # 允许直接写列表里的序号
         idx = int(chapter)
         if not 1 <= idx <= len(secs):
             print(f"\n序号 {idx} 超出范围 1-{len(secs)}。")
             return 5
+        section_n = idx
         chapter = secs[idx - 1].title
 
     missing = [k for k in REQUIRED if not os.environ.get(k)]
@@ -78,7 +80,8 @@ def main() -> int:
     llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"],
               os.environ["LLM_MODEL"])
     try:
-        lesson = build_lesson(llm, ir, chapter, n)
+        kwargs = {"section_n": section_n} if section_n is not None else {}
+        lesson = build_lesson(llm, ir, chapter, n, **kwargs)
     except StudyError as exc:
         print()
         _report(exc)

@@ -161,3 +161,38 @@ def test_locate_quote_rejects_a_stitch_across_columns():
 def test_locate_quote_returns_empty_when_quote_is_absent():
     blocks = [_line("b1", "这里只有这一句", 100.0)]
     assert locate_quote("原文里根本没有的话", blocks) == []
+
+
+def test_build_sections_keeps_non_contiguous_duplicate_headings_separate():
+    """隔着其他章节出现的同名小节（如两章各自的「小结」）不能并成一节。"""
+    ir = DocIR(doc_id="x", filename="t.pdf", page_count=4, blocks=[
+        Block(id="b1", kind="heading", text="第1章", page=1, level=1, section_path=["第1章"]),
+        Block(id="b2", kind="heading", text="小结", page=1, level=2, section_path=["第1章", "小结"]),
+        Block(id="b3", kind="heading", text="小结", page=2, level=1, section_path=["小结"]),
+        Block(id="b4", kind="heading", text="第2章", page=3, level=1, section_path=["第2章"]),
+        Block(id="b5", kind="heading", text="小结", page=4, level=1, section_path=["小结"]),
+    ])
+    secs = build_sections(ir)
+    assert [(s.title, s.page_start, s.page_end) for s in secs] == [
+        ("第1章", 1, 1),
+        ("小结", 1, 1),
+        ("小结", 2, 2),
+        ("第2章", 3, 3),
+        ("小结", 4, 4),
+    ]
+
+
+def test_select_chapter_supports_index_path_and_digit_boundaries():
+    ir = DocIR(doc_id="x", filename="t.pdf", page_count=4, blocks=[
+        Block(id="b1", kind="heading", text="10.1 波动", page=1, level=1, section_path=["10.1 波动"]),
+        Block(id="b2", kind="heading", text="1 绪论", page=2, level=1, section_path=["1 绪论"]),
+        Block(id="b3", kind="heading", text="小结", page=2, level=2, section_path=["1 绪论", "小结"]),
+        Block(id="b4", kind="heading", text="2 方法", page=3, level=1, section_path=["2 方法"]),
+        Block(id="b5", kind="heading", text="小结", page=4, level=2, section_path=["2 方法", "小结"]),
+    ])
+    secs = build_sections(ir)
+    assert [s.title for s in select_chapter(secs, "1")] == ["1 绪论", "小结"]
+    assert [s.path for s in select_chapter(secs, "2 方法 > 小结")] == [["2 方法", "小结"]]
+    assert [s.path for s in select_chapter(secs, "小结", index=5)] == [["2 方法", "小结"]]
+    assert select_chapter(secs, "小结", index=0) == []
+    assert select_chapter(secs, "小结", index=99) == []

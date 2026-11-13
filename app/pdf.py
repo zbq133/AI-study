@@ -293,28 +293,33 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr", should_stop=None)
 
     raw = []
     ocr_pages = []
-    for i, page in enumerate(doc):
-        if should_stop is not None and should_stop():
-            raise Cancelled("解析中断了")
-        lines = _page_lines(page)
-        if not lines and ocr:
-            from .ocr import ocr_page_cached
+    try:
+        page_count = doc.page_count
+        for i, page in enumerate(doc):
+            if should_stop is not None and should_stop():
+                raise Cancelled("解析中断了")
+            lines = _page_lines(page)
+            if not lines and ocr:
+                from .ocr import ocr_page_cached
 
-            lines = ocr_page_cached(page, doc_id, i + 1, cache_dir=ocr_cache)
-            if lines:
-                ocr_pages.append(i + 1)
-        raw.append((i + 1, lines, page.rect.width, page.rect.height))
+                lines = ocr_page_cached(page, doc_id, i + 1, cache_dir=ocr_cache)
+                if lines:
+                    ocr_pages.append(i + 1)
+            raw.append((i + 1, lines, page.rect.width, page.rect.height))
 
-    if not any(lines for _, lines, *_ in raw):
-        if ocr:
+        if not any(lines for _, lines, *_ in raw):
+            if ocr:
+                raise NoTextLayer(
+                    f"{path.name}：{page_count} 页既没有文字层，OCR 也没认出内容。"
+                    "确认文件不是空的或加密的；扫描件可以试着提高 dpi 再跑。"
+                )
             raise NoTextLayer(
-                f"{path.name}：{doc.page_count} 页既没有文字层，OCR 也没认出内容。"
-                "确认文件不是空的或加密的；扫描件可以试着提高 dpi 再跑。"
+                f"{path.name}：{page_count} 页里没有任何文字层（扫描件或图片型课件）。"
+                "传 ocr=True 让它走 OCR：extract_ir(path, ocr=True)"
             )
-        raise NoTextLayer(
-            f"{path.name}：{doc.page_count} 页里没有任何文字层（扫描件或图片型课件）。"
-            "传 ocr=True 让它走 OCR：extract_ir(path, ocr=True)"
-        )
+        toc = [[lvl, title, pno] for lvl, title, pno in (doc.get_toc() or [])]
+    finally:
+        doc.close()
     # 页眉页脚先摘掉，再算字号基准、再排阅读顺序 —— 留着它们，基准和段落都会
     # 被这些每页重复的短行带偏。
     drop = _running_lines(raw)
@@ -327,7 +332,6 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr", should_stop=None)
 
     base = _mode_size([(l[1], len(l[0])) for _, lines, *_ in raw for l in lines])
 
-    toc = [[lvl, title, pno] for lvl, title, pno in (doc.get_toc() or [])]
     toc_map = {_toc_key(t): (lvl, t) for lvl, t, _ in toc}
 
     ocr_set = set(ocr_pages)
@@ -398,7 +402,7 @@ def extract_ir(path, *, ocr: bool = True, ocr_cache="out/ocr", should_stop=None)
     return DocIR(
         doc_id=doc_id,
         filename=path.name,
-        page_count=doc.page_count,
+        page_count=page_count,
         blocks=blocks,
         toc=toc,
         ocr_pages=ocr_pages,

@@ -133,36 +133,87 @@ _ROOT_LABEL = "（正文前）"
 
 
 def build_sections(ir: DocIR) -> list[Section]:
-    order: list[tuple] = []
-    box: dict[tuple, Section] = {}
+    # 只合并连续属于同一标题路径的块：同一份文档里不同章节出现同名小节
+    # （如两章各有「小结」）时，不能隔着中间章节强行并成一节。
+    out: list[Section] = []
+    cur_key: tuple | None = None
     for b in ir.blocks:
         # 首页的页眉、期刊名、作者信息出现在第一个标题之前，section_path 是空的。
         # 以前这里塞 "__root__" 当键，会一路漏到 CLI 的"可用章节"列表和讲义标题上，
         # 主人看到的就是一个叫 __root__ 的章节。
         key = tuple(b.section_path) if b.section_path else (_ROOT_LABEL,)
-        if key not in box:
-            box[key] = Section(title=key[-1], path=list(key),
-                               page_start=b.page, page_end=b.page)
-            order.append(key)
-        s = box[key]
+        if key != cur_key:
+            out.append(Section(title=key[-1], path=list(key),
+                               page_start=b.page, page_end=b.page))
+            cur_key = key
+        s = out[-1]
         s.page_start = min(s.page_start, b.page)
         s.page_end = max(s.page_end, b.page)
         s.block_ids.append(b.id)
         s.text += f"[p{b.page}] {b.text}\n"
-    return [box[k] for k in order]
+    return out
 
 
-def select_chapter(sections: list[Section], query: str) -> list[Section]:
+def _boundary_in(needle: str, haystack: str) -> bool:
+    """数字起止时卡住数字与小数点边界，避免 '1' 误匹配到 '10.1'。"""
+    pat = re.escape(needle)
+    if needle[0].isascii() and needle[0].isdigit():
+        pat = r"(?<![\d.])" + pat
+    if needle[-1].isascii() and needle[-1].isdigit():
+        pat = pat + r"(?!\d)"
+    return bool(re.search(pat, haystack))
+
+
+def _find_section_start(sections: list[Section], query: str) -> int | None:
+    if ">" in query:
+        parts = [normalize(p) for p in query.split(">") if normalize(p)]
+        if parts:
+            for i, s in enumerate(sections):
+                if [normalize(p) for p in s.path] == parts:
+                    return i
+            for i, s in enumerate(sections):
+                if len(s.path) == len(parts) and all(
+                    qp in normalize(sp) for qp, sp in zip(parts, s.path)
+                ):
+                    return i
+            for i, s in enumerate(sections):
+                if len(s.path) >= len(parts) and all(
+                    qp in normalize(sp) for qp, sp in zip(parts, s.path[-len(parts):])
+                ):
+                    return i
     q = normalize(query)
     if not q:
-        return []
-    start = None
+        return None
+    for i, s in enumerate(sections):
+        if normalize(s.title) == q:
+            return i
+    for i, s in enumerate(sections):
+        if normalize("".join(s.path)) == q:
+            return i
+    for i, s in enumerate(sections):
+        if _boundary_in(q, normalize(s.title)):
+            return i
+    for i, s in enumerate(sections):
+        if q in normalize(s.title):
+            return i
     for i, s in enumerate(sections):
         if q in normalize("".join(s.path)):
-            start = i
-            break
-    if start is None:
-        return []
+            return i
+    return None
+
+
+def select_chapter(sections: list[Section], query: str,
+                   index: int | None = None) -> list[Section]:
+    if index is not None:
+        if not 1 <= index <= len(sections):
+            return []
+        start: int | None = index - 1
+    else:
+        if not normalize(query):
+            return []
+        start = _find_section_start(sections, query)
+        if start is None:
+            return []
     root = sections[start]
     base_len = len(root.path)
     out = [root]

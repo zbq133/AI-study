@@ -1472,3 +1472,154 @@ def test_the_selected_chapter_is_darker_than_the_rest(env):
     sel_bg = re.search(r"--sel-bg:(#[0-9a-f]{6})", light).group(1)
     panel = re.search(r"--panel:(#[0-9a-f]{6})", light).group(1)
     assert _contrast(sel_bg, panel) > 1.06, f"选中的底色和未选中几乎一样：{sel_bg} vs {panel}"
+
+
+def test_do_lesson_records_pdf_page_count_not_section_count(env, doc_pdf, monkeypatch):
+    """index.json 里的 pages 必须是 PDF 总页数，不能错写成讲义节数。"""
+    from app.schema import Block, DocIR
+    from app.store import Store
+
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+
+    ir = DocIR(
+        doc_id="doc3p",
+        filename="three.pdf",
+        page_count=3,
+        blocks=[
+            Block(id="b1", kind="heading", text="Chapter 1 Introduction", page=1,
+                  level=1, section_path=["Chapter 1 Introduction"]),
+            Block(id="b2", kind="para", text=QUOTE, page=1,
+                  section_path=["Chapter 1 Introduction"]),
+            Block(id="b3", kind="para", text="page 2 text", page=2,
+                  section_path=["Chapter 1 Introduction"]),
+            Block(id="b4", kind="para", text="page 3 text", page=3,
+                  section_path=["Chapter 1 Introduction"]),
+        ],
+    )
+    serve.DOCS["doc3p"] = {"path": doc_pdf, "filename": "three.pdf", "ir": ir}
+    job = serve.Job("lesson", "Chapter 1 Introduction")
+    serve._do_lesson(job, "doc3p", "Chapter 1 Introduction", 1)
+    rec = Store(serve.OUT_DIR).list()[0]
+    assert rec["pages"] == 3
+    assert rec["sections"] == 1
+
+
+def test_do_lesson_with_section_n_keeps_duplicate_chapters_distinct(env, doc_pdf, monkeypatch):
+    """不同章节下各有「小结」时，传 section_n 必须只读对应那节且各自独立落盘。"""
+    from app.schema import Block, DocIR
+    from app.store import Store
+
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+
+    q2 = "第二章小结里独有的另一句逐字原文"
+
+    class _DupLLM(_FakeLLM):
+        def json(self, system, user, model_cls, temperature=0.3, retries=2):
+            name = getattr(model_cls, "__name__", "")
+            use_q = q2 if q2 in user else QUOTE
+            if name == "LessonSection":
+                return LessonSection(title="知识点A", explanation_md="讲解",
+                                     key_points=["要点"], pitfalls=[],
+                                     source_refs=[SourceRef(page=2 if q2 in user else 1,
+                                                            quote=use_q)])
+            if name == "QuizPack":
+                return QuizPack(items=[
+                    QuizItem(type="single", stem="好题：下列说法正确的是？",
+                             options=["甲", "乙", "丙", "丁"], answer="B",
+                             source_ref=SourceRef(page=2 if q2 in user else 1,
+                                                  quote=use_q))])
+            return super().json(system, user, model_cls, temperature, retries)
+
+    monkeypatch.setattr(serve, "LLM", _DupLLM)
+    ir = DocIR(
+        doc_id="dup1",
+        filename="dup.pdf",
+        page_count=2,
+        blocks=[
+            Block(id="b1", kind="heading", text="第1章", page=1, level=1, section_path=["第1章"]),
+            Block(id="b2", kind="heading", text="小结", page=1, level=2, section_path=["第1章", "小结"]),
+            Block(id="b3", kind="para", text=QUOTE, page=1, section_path=["第1章", "小结"]),
+            Block(id="b4", kind="heading", text="第2章", page=2, level=1, section_path=["第2章"]),
+            Block(id="b5", kind="heading", text="小结", page=2, level=2, section_path=["第2章", "小结"]),
+            Block(id="b6", kind="para", text=q2, page=2, section_path=["第2章", "小结"]),
+        ],
+    )
+    serve.DOCS["dup1"] = {"path": doc_pdf, "filename": "dup.pdf", "ir": ir}
+    serve._do_lesson(serve.Job("lesson", "小结"), "dup1", "小结", 1, section_n=2)
+    serve._do_lesson(serve.Job("lesson", "小结"), "dup1", "小结", 1, section_n=4)
+
+    rows = Store(serve.OUT_DIR).list()
+    assert len(rows) == 2
+    assert {r["chapter"] for r in rows} == {"第1章 > 小结", "第2章 > 小结"}
+    assert len({r["file"] for r in rows}) == 2
+
+
+def test_upload_rejects_empty_pdf_and_leaves_no_temp_file(env):
+    """0 字节或不足 5 字节的 .pdf 不能绕过校验返回 200，也不能在 uploads/ 留下临时文件。"""
+    with TestClient(serve.app) as client:
+        for payload in (b"", b"%PD"):
+            r = client.post("/api/docs", files={"file": ("empty.pdf", payload, "application/pdf")})
+            assert r.status_code == 400
+    assert not list((env / "uploads").glob("*")) if (env / "uploads").exists() else True
+
+
+def test_upload_above_limit_cleans_up_temp_file(env, monkeypatch):
+    """超过大小上限抛 413 时，已经写到一半的 .incoming-* 临时文件必须删干净。"""
+    monkeypatch.setattr(serve, "MAX_UPLOAD", 1 << 20)
+    with TestClient(serve.app) as client:
+        r = client.post("/api/docs", files={
+            "file": ("big.pdf", b"%PDF-1.4\n" + b"0" * (1 << 20), "application/pdf")
+        })
+    assert r.status_code == 413
+    assert list((env / "uploads").glob("*")) == []
+
+
+def test_upload_refreshes_filename_after_restart_recovery(env, doc_pdf):
+    """重启恢复会让 filename 临时退回 <doc_id>.pdf，重新上传同一份文件要刷新原文件名。"""
+    with TestClient(serve.app) as client:
+        doc_id, _ = _parsed(client, doc_pdf)
+        serve.DOCS.clear()
+        pj = client.post(f"/api/docs/{doc_id}/parse").json()
+        if pj.get("job_id"):
+            snap = _wait(client, pj["job_id"])
+            assert snap["state"] == "done", snap["error"]
+        assert serve.DOCS[doc_id]["filename"] == f"{doc_id}.pdf"
+        r = _upload(client, doc_pdf, name="真实课件名.pdf")
+        assert r.status_code == 200
+        assert serve.DOCS[doc_id]["filename"] == "真实课件名.pdf"
+        assert serve.DOCS[doc_id]["ir"] is not None
+
+
+def test_post_lesson_accepts_section_n_for_duplicate_headings(env, doc_pdf, monkeypatch):
+    """POST /api/lessons 传 section_n 可以区分同名章节。"""
+    from app.schema import Block, DocIR
+
+    for key, val in zip(serve.REQUIRED, ("http://x", "sk-test", "fake-model")):
+        monkeypatch.setenv(key, val)
+    monkeypatch.setattr(serve, "LLM", _FakeLLM)
+
+    with TestClient(serve.app) as client:
+        doc_id, _ = _parsed(client, doc_pdf)
+        serve.DOCS[doc_id]["ir"] = DocIR(
+            doc_id=doc_id,
+            filename="dup.pdf",
+            page_count=2,
+            blocks=[
+                Block(id="b1", kind="heading", text="第1章", page=1, level=1, section_path=["第1章"]),
+                Block(id="b2", kind="heading", text="小结", page=1, level=2, section_path=["第1章", "小结"]),
+                Block(id="b3", kind="para", text=QUOTE, page=1, section_path=["第1章", "小结"]),
+                Block(id="b4", kind="heading", text="第2章", page=2, level=1, section_path=["第2章"]),
+                Block(id="b5", kind="heading", text="小结", page=2, level=2, section_path=["第2章", "小结"]),
+                Block(id="b6", kind="para", text=QUOTE, page=2, section_path=["第2章", "小结"]),
+            ],
+        )
+        r1 = client.post("/api/lessons", json={"doc_id": doc_id, "chapter": "小结", "n_quiz": 1, "section_n": 2})
+        r2 = client.post("/api/lessons", json={"doc_id": doc_id, "chapter": "小结", "n_quiz": 1, "section_n": 4})
+        assert _wait(client, r1.json()["job_id"])["state"] == "done"
+        assert _wait(client, r2.json()["job_id"])["state"] == "done"
+        rows = client.get("/api/lessons").json()["lessons"]
+    assert len(rows) == 2
+    assert {r["chapter"] for r in rows} == {"第1章 > 小结", "第2章 > 小结"}

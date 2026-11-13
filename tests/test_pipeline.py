@@ -281,3 +281,41 @@ def test_every_style_says_facts_are_not_negotiable():
         block = style_block(key)
         assert "不许为了好玩编事实" in block, key
         assert "出处" in block, key
+
+
+def test_build_lesson_selects_duplicate_heading_by_section_n():
+    """同名小节靠 section_n 精确挑中第二处，而不是永远落在第一处。"""
+    q2 = "第二章小结里独有的另一句逐字原文"
+    ir = DocIR(doc_id="d1", filename="t.pdf", page_count=2, blocks=[
+        Block(id="b1", kind="heading", text="第1章", page=1, level=1, section_path=["第1章"]),
+        Block(id="b2", kind="heading", text="小结", page=1, level=2, section_path=["第1章", "小结"]),
+        Block(id="b3", kind="para", text=QUOTE, page=1, section_path=["第1章", "小结"]),
+        Block(id="b4", kind="heading", text="第2章", page=2, level=1, section_path=["第2章"]),
+        Block(id="b5", kind="heading", text="小结", page=2, level=2, section_path=["第2章", "小结"]),
+        Block(id="b6", kind="para", text=q2, page=2, section_path=["第2章", "小结"]),
+    ])
+
+    class _Pick2LLM(FakeLLM):
+        def __init__(self):
+            super().__init__()
+            self.seen_users = []
+
+        def json(self, system, user, model_cls, temperature=0.3, retries=2):
+            self.seen_users.append(user)
+            name = getattr(model_cls, "__name__", "")
+            if name == "LessonSection":
+                return LessonSection(title="知识点A", explanation_md="讲解",
+                                     key_points=["要点"], pitfalls=[],
+                                     source_refs=[SourceRef(page=2, quote=q2)])
+            if name == "QuizPack":
+                return QuizPack(items=[
+                    QuizItem(type="single", stem="好题：下列说法正确的是？",
+                             options=["甲", "乙", "丙", "丁"], answer="B",
+                             source_ref=SourceRef(page=2, quote=q2))])
+            return super().json(system, user, model_cls, temperature, retries)
+
+    llm = _Pick2LLM()
+    lesson = build_lesson(llm, ir, "小结", n_quiz=1, section_n=4)
+    assert all(QUOTE not in u for u in llm.seen_users)
+    assert [r.blocks for r in lesson.sections[0].source_refs] == [["b6"]]
+    assert lesson.quiz[0].source_ref.blocks == ["b6"]

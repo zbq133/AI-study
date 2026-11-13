@@ -417,3 +417,52 @@ def test_requirements_pin_a_pymupdf_that_has_the_pymupdf_module():
     m = re.search(r"PyMuPDF>=([\d.]+)", req, re.I)
     assert m, req
     assert tuple(int(x) for x in m.group(1).split(".")) >= (1, 24, 3)
+
+
+def test_extract_ir_always_closes_pdf_handle(tmp_path, monkeypatch):
+    """正常返回或提前抛 Cancelled / NoTextLayer，都要把 PyMuPDF 文档句柄关掉。"""
+    import app.pdf as pdf_mod
+    from app.errors import Cancelled
+    from app.pdf import NoTextLayer
+
+    closed: list[bool] = []
+    real_open = fitz.open
+
+    class _TrackedDoc:
+        def __init__(self, doc):
+            self._doc = doc
+
+        def __getattr__(self, name):
+            return getattr(self._doc, name)
+
+        def __iter__(self):
+            return iter(self._doc)
+
+        def close(self):
+            closed.append(True)
+            return self._doc.close()
+
+    monkeypatch.setattr(pdf_mod.fitz, "open", lambda *a, **kw: _TrackedDoc(real_open(*a, **kw)))
+
+    ok_pdf = tmp_path / "ok.pdf"
+    d = real_open()
+    d.new_page().insert_text((72, 90), "hello world", fontsize=12)
+    d.save(str(ok_pdf))
+    d.close()
+
+    extract_ir(ok_pdf, ocr=False)
+    assert closed == [True]
+
+    with pytest.raises(Cancelled):
+        extract_ir(ok_pdf, ocr=False, should_stop=lambda: True)
+    assert closed == [True, True]
+
+    blank_pdf = tmp_path / "blank.pdf"
+    d2 = real_open()
+    d2.new_page()
+    d2.save(str(blank_pdf))
+    d2.close()
+
+    with pytest.raises(NoTextLayer):
+        extract_ir(blank_pdf, ocr=False)
+    assert closed == [True, True, True]

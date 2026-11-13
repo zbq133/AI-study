@@ -35,7 +35,7 @@ from .errors import MissingConfig, describe
 from .llm import LLM
 from .pdf import content_id, extract_ir, page_block_map
 from .pipeline import build_lesson
-from .schema import Lesson, build_sections, is_reference_title
+from .schema import Lesson, build_sections, is_reference_title, select_chapter
 from .store import Store, make_id
 
 load_dotenv()
@@ -249,7 +249,8 @@ def _safe(name: str) -> str:
     return "".join("_" if c in bad else c for c in name).strip()[:80]
 
 
-def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
+def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int,
+               section_n: Optional[int] = None) -> None:
     missing = _missing()
     if missing:
         raise MissingConfig(
@@ -286,9 +287,21 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
 
     with _generate_lock:
         lesson = build_lesson(llm, ir, chapter, n_quiz, on_step=on_step,
-                              style=eff["style"])
+                              style=eff["style"], section_n=section_n)
 
-    out = OUT_DIR / f"{Path(DOCS[doc_id]['path']).stem}_{_safe(chapter)}.json"
+    secs = build_sections(ir)
+    picked = select_chapter(secs, chapter, index=section_n)
+    chapter_key = chapter
+    if section_n is not None and picked:
+        if sum(1 for s in secs if s.title == picked[0].title) > 1:
+            path_key = " > ".join(picked[0].path)
+            chapter_key = (f"{path_key}#{section_n}"
+                           if sum(1 for s in secs if s.path == picked[0].path) > 1
+                           else path_key)
+    if chapter_key != chapter:
+        lesson.chapter = chapter_key
+
+    out = OUT_DIR / f"{Path(DOCS[doc_id]['path']).stem}_{_safe(chapter_key)}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(lesson.model_dump_json(indent=2), encoding="utf-8")
 
@@ -296,12 +309,12 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
     job.prompt_tokens = getattr(llm, "prompt_tokens", 0)
     job.completion_tokens = getattr(llm, "completion_tokens", 0)
     rec = _store().put({
-        "id": make_id(doc_id, chapter),
+        "id": make_id(doc_id, chapter_key),
         "doc_id": doc_id,
-        "chapter": chapter,
+        "chapter": chapter_key,
         "filename": DOCS[doc_id]["filename"],
         "file": out.name,
-        "pages": len(lesson.sections),
+        "pages": ir.page_count,
         "sections": len(lesson.sections),
         "quiz": len(lesson.quiz),
         "calls": job.calls,
@@ -309,7 +322,7 @@ def _do_lesson(job: Job, doc_id: str, chapter: str, n_quiz: int) -> None:
         "completion_tokens": job.completion_tokens,
         "seconds": round((job.t1 or time.time()) - job.t0, 1),
     })
-    job.result = {"file": str(out), "chapter": chapter, "lesson_id": rec["id"],
+    job.result = {"file": str(out), "chapter": chapter_key, "lesson_id": rec["id"],
                   "sections": len(lesson.sections), "quiz": len(lesson.quiz),
                   "lesson": lesson.model_dump()}
     # 降级过的地方都要说出来：思考等级被模型拒了、或者代理连不上改成了直连
@@ -391,35 +404,49 @@ async def upload(file: UploadFile) -> dict:
     # doc_id，历史讲义里的 record.doc_id 才对得上，出处才能点回原文。
     hasher = hashlib.sha256()
     size = 0
-    tmp: Optional[Path] = None
+    head = bytearray()
+    checked = False
+    tmp = UPLOAD_DIR / f".incoming-{uuid.uuid4().hex}"
     fh = None
+    committed = False
     try:
         while chunk := await file.read(1 << 20):
             size += len(chunk)
             if size > MAX_UPLOAD:
                 raise HTTPException(413, f"文件超过 {MAX_UPLOAD // 1024 // 1024}MB")
-            if size == len(chunk) and not chunk.startswith(b"%PDF-"):
-                # 只看扩展名的话，80MB 的 exe 改个名就能躺进 uploads/
-                raise HTTPException(400, "这个文件不是 PDF（开头没有 %PDF 标记）")
-            if tmp is None:
-                tmp = UPLOAD_DIR / ".incoming"
+            if not checked:
+                head.extend(chunk[:5 - len(head)])
+                if len(head) >= 5:
+                    checked = True
+                    if not head.startswith(b"%PDF-"):
+                        # 只看扩展名的话，80MB 的 exe 改个名就能躺进 uploads/
+                        raise HTTPException(400, "这个文件不是 PDF（开头没有 %PDF 标记）")
+            if fh is None:
                 fh = tmp.open("wb")
             fh.write(chunk)
             hasher.update(chunk)
+        if size == 0 or not checked:
+            raise HTTPException(400, "这个文件不是有效 PDF（文件为空或开头没有 %PDF 标记）")
+        if fh is not None:
+            fh.close()
+            fh = None
+        doc_id = hasher.hexdigest()[:16]
+        dest = UPLOAD_DIR / f"{doc_id}.pdf"
+        if dest.exists():
+            tmp.unlink(missing_ok=True)   # 同一份文件已经有了，不重复占地方
+        else:
+            tmp.replace(dest)
+        committed = True
     finally:
         if fh is not None:
             fh.close()
-        elif tmp is not None:
-            tmp.unlink(missing_ok=True)   # 没写成就别留空壳
-    doc_id = hasher.hexdigest()[:16]
-    dest = UPLOAD_DIR / f"{doc_id}.pdf"
-    if tmp is not None:
-        if dest.exists():
-            tmp.unlink()                  # 同一份文件已经有了，不重复占地方
-        else:
-            tmp.replace(dest)
+        if not committed:
+            tmp.unlink(missing_ok=True)   # 没写成就别留空壳 / 超限残留
     if DOCS.get(doc_id) is None:
         DOCS[doc_id] = {"path": dest, "filename": name, "ir": None}
+    else:
+        DOCS[doc_id]["path"] = dest
+        DOCS[doc_id]["filename"] = name
     return {"doc_id": doc_id, "filename": name, "bytes": size}
 
 
@@ -499,6 +526,7 @@ class LessonReq(BaseModel):
     doc_id: str
     chapter: str
     n_quiz: int = 3
+    section_n: Optional[int] = None
 
 
 @app.post("/api/lessons")
@@ -510,7 +538,7 @@ async def create_lesson(req: LessonReq) -> dict:
         raise HTTPException(409, "这份 PDF 还没解析，先调 /api/docs/{id}/parse")
     n = max(1, min(req.n_quiz, 10))
     job = _new_job("lesson", req.chapter)
-    _spawn(job, _do_lesson, req.doc_id, req.chapter, n)
+    _spawn(job, _do_lesson, req.doc_id, req.chapter, n, req.section_n)
     return {"job_id": job.id}
 
 
