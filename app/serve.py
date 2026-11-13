@@ -482,12 +482,13 @@ async def layout(doc_id: str, pages: str = "") -> dict:
         raise HTTPException(409, "还没解析，先调 /parse")
     want = _parse_pages(pages)
     per = page_block_map(ir)
+    ocr_set = set(ir.ocr_pages)
     out = []
     for pno in sorted(per):
         if want is not None and pno not in want:
             continue
         w, h = ir.page_sizes.get(pno, (595.0, 842.0))
-        out.append({"page": pno, "w": w, "h": h,
+        out.append({"page": pno, "w": w, "h": h, "ocr": pno in ocr_set,
                     "blocks": [{"id": b.id, "kind": b.kind, "text": b.text,
                                 "level": b.level, "bbox": list(b.bbox) if b.bbox else None}
                                for b in per[pno]]})

@@ -643,6 +643,7 @@ def test_layout_returns_blocks_with_ids(env, doc_pdf):
                              "figure", "caption"}
     # 前端要把 bbox 换算成图片上的百分比：页面尺寸和矩形都得给
     assert pages[0]["w"] > 0 and pages[0]["h"] > 0
+    assert pages[0]["ocr"] is False
     assert len(first["bbox"]) == 4
 
 
@@ -681,7 +682,7 @@ def test_opening_an_old_lesson_points_the_source_column_at_its_own_pdf(env):
     """打开旧讲义时得先认下它自己那份 PDF —— 否则 afterParse 里取原文还是在问上一份。"""
     with TestClient(serve.app) as client:
         js = client.get("/static/app.js").text
-    body = js[js.index("async function openLesson"):js.index("function waitJob")]
+    body = js[js.index("async function openLesson"):js.index("$('#histBody').addEventListener")]
     assert body.index("docId = record.doc_id;") < body.index("await afterParse(")
     # 取原文失败（还没解析好）要把清单清掉，不然同一批页永远不会重取
     rs = js[js.index("function renderSource"):js.index("function paintSource")]
@@ -780,14 +781,16 @@ def test_katex_fonts_are_served_as_woff2():
 
 
 def test_index_loads_katex_and_the_grader_before_app_js():
-    """三个脚本的顺序是硬要求：KaTeX 先于 app.js，判分模块也先于 app.js。"""
+    """脚本顺序是硬要求：KaTeX、判分模块、流程模块都要先于 app.js（app.js 顶层就要用 Flow）。"""
     html = (serve.WEB_DIR / "index.html").read_text(encoding="utf-8")
     css = html.index("vendor/katex/katex.min.css")
     katex = html.index("vendor/katex/katex.min.js")
     grader = html.index("/static/grade.js")
+    flow = html.index("/static/flow.js")
     appjs = html.index("/static/app.js")
     assert css < katex < appjs
     assert katex < grader < appjs
+    assert flow < appjs
 
 
 def test_static_cannot_escape_through_a_subpath():
@@ -956,9 +959,10 @@ def test_opening_an_old_lesson_does_not_wipe_it(env):
     assert "resetLesson = true" in body
     assert "if (!resetLesson) return;" in body
     assert body.index("if (!resetLesson) return;") < body.index("$('#lessonBody').innerHTML")
-    old = js[js.index("async function openLesson"):js.index("function waitJob")]
-    assert "afterParse(snap.result, false)" in old
-    assert "afterParse(pj.result, false)" in old
+    old = js[js.index("async function openLesson"):js.index("$('#histBody').addEventListener")]
+    assert "Flow.pollJob(getJob, pj.job_id)" in old
+    assert "pj.result" in old
+    assert "afterParse(res.result, false" in old
 
 
 def test_delete_lesson_removes_the_file_too(doc_pdf, monkeypatch):
@@ -1219,9 +1223,12 @@ def test_chapter_pages_are_not_scraped_off_the_option_text(env):
     """页码要从解析结果里取，别拿正则去抠 DOM 上的显示文案。"""
     with TestClient(serve.app) as client:
         js = client.get("/static/app.js").text
+        flow = client.get("/static/flow.js").text
     assert "opt.textContent.match" not in js, "又在拿 DOM 当数据库用"
     assert "sections = res.sections" in js
-    assert "function byTitle" in js
+    assert "function pickSection" in js
+    assert "Flow.findSection(sections, key)" in js
+    assert "function findSection" in flow
 
 
 def test_graded_questions_keep_a_way_back_to_the_explanation(env):
@@ -1247,11 +1254,12 @@ def test_the_source_column_shows_the_real_pages(env):
     with TestClient(serve.app) as client:
         js = client.get("/static/app.js").text
         css = client.get("/static/app.css").text
-        html = client.get("/").text
-    body = js[js.index("function paintSource"):js.index("function paintHighlight")]
+    body = js[js.index("function paintSource"):js.index("function clearHighlight")]
     assert "/page/${p.page}.png" in body          # 每页一张图
     assert "hl-layer" in body                     # 高亮层贴在图上面
     assert "noimg" in body                        # 图挂了退回文字版
+    assert "aspect-ratio:${p.w || 595} / ${p.h || 842}" in body
+    assert "OCR 识别页" in body
     # 页面尺寸必须来自服务端（每份 PDF 都可能不一样），不能写死 A4
     assert 'data-w="${p.w' in body and 'data-h="${p.h' in body
     assert ".hlbox" in css and ".pgimg > img" in css
@@ -1261,15 +1269,20 @@ def test_clicking_a_ref_highlights_by_geometry(env):
     """高亮按 bbox 换算成百分比贴，别指望文字块还能对上。"""
     with TestClient(serve.app) as client:
         js = client.get("/static/app.js").text
+        flow = client.get("/static/flow.js").text
+    ht = flow[flow.index("function highlightTargets"):flow.index("function quizStats")]
+    assert "b.bbox" in ht
+    assert "(x0 / W) * 100" in ht
+    assert "(y0 / H) * 100" in ht
+    assert "((x1 - x0) / W) * 100" in ht
+    assert "((y1 - y0) / H) * 100" in ht
     body = js[js.index("function paintHighlight"):js.index("closest('.ref')")]
-    assert "b.bbox" in body
-    # 四个边都要按原页尺寸算：只查"出现了 100"会被 `left:0%` 骗过去
-    assert "left:${(x0 / w) * 100}%" in body
-    assert "top:${(y0 / h) * 100}%" in body
-    assert "/ w) * 100}%" in body and "/ h) * 100}%" in body
+    assert "Flow.highlightTargets" in body
     assert "hlbox" in body
+    assert "blk.classList.add('hl')" in body
     click = js[js.index("closest('.ref')"):js.index("设置：左下角")]
     assert "paintHighlight(ids)" in click
+    assert "btn.classList.add('on')" in click
 
 
 def test_settings_do_not_close_when_you_click_outside(env):
@@ -1623,3 +1636,34 @@ def test_post_lesson_accepts_section_n_for_duplicate_headings(env, doc_pdf, monk
         rows = client.get("/api/lessons").json()["lessons"]
     assert len(rows) == 2
     assert {r["chapter"] for r in rows} == {"第1章 > 小结", "第2章 > 小结"}
+
+
+def test_layout_marks_ocr_pages(env, doc_pdf):
+    """走过 OCR 的页要在 /layout 里标出来，前端才能在原文页顶提醒公式可能不准。"""
+    with TestClient(serve.app) as client:
+        doc_id, _ = _parsed(client, doc_pdf)
+        serve.DOCS[doc_id]["ir"].ocr_pages = [1]
+        r = client.get(f"/api/docs/{doc_id}/layout")
+    assert r.status_code == 200
+    pages = r.json()["pages"]
+    assert pages[0]["ocr"] is True
+
+
+def test_frontend_renders_complete_lesson_and_export_feedback(env):
+    """讲义的一句话概括/要点总结/重解徽章、填空答案渲染公式、以及导出时的状态条反馈都要在位。"""
+    with TestClient(serve.app) as client:
+        js = client.get("/static/app.js").text
+        css = client.get("/static/app.css").text
+        html = client.get("/").text
+    rl = js[js.index("function renderLesson"):js.index("function updateQuizScore")]
+    assert "L.summary_one_liner" in rl
+    assert "L.summary_bullets" in rl
+    rq = js[js.index("function renderQuiz"):js.index("function qItem")]
+    assert "it.verified" in rq and "独立重解已验证" in rq
+    assert 'id="quizScore"' in rq
+    ra = js[js.index("function revealAnswer"):js.index("$('#lesson').addEventListener")]
+    assert "paintMath(q.querySelector('.qans'))" in ra
+    exp = js[js.index("$('#export').onclick"):js.index("function togglePick")]
+    assert "$('#runLine').classList.remove('hide')" in exp
+    assert 'id="toTop"' in html and ".top-jump" in css and ".ref.on" in css
+

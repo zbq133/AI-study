@@ -7,6 +7,7 @@ let layout = null;      // {pages:[{page, blocks:[{id,kind,text,level}]}]}
 let section = null;     // 当前选中的章节（来自解析结果）
 let sections = [];      // 解析结果原样存着 —— 页码从这里取，别去抠 DOM 上的文案
 let lesson = null;      // 生成出来的讲义
+let busy = false;       // 正在上传/解析/生成：这期间别让别的路径把按钮又解开
 
 /* ---------------- 极简 Markdown：段落 / 标题 / 列表 / 粗体 / 行内代码 ------------- */
 /* 只渲染讲义里实际会出现的语法。宁可少认，也别把 $x^2$ 当 HTML 吃掉。 */
@@ -97,6 +98,19 @@ function stageView(bar, stageEl, detailEl, snap) {
                           .filter(Boolean).join(' · ');
 }
 
+/** 取一条任务的快照，给 Flow.pollJob 用（网络错误直接 reject，由它计数）。 */
+async function getJob(id) {
+  const r = await fetch(`/api/jobs/${encodeURIComponent(id)}`);
+  return { ok: r.ok, status: r.status, snap: r.ok ? await r.json() : null };
+}
+
+/** 读错误响应的 detail；不是 JSON 也别再抛一次。 */
+async function errOf(r) {
+  let text = '';
+  try { text = await r.text(); } catch (e) { /* 连接断了 */ }
+  return Flow.errorText(r.status, text);
+}
+
 function watch(jobId, onDone) {
   const stop = $('#stop');
   stop.classList.remove('hide');
@@ -107,15 +121,27 @@ function watch(jobId, onDone) {
     stop.textContent = '停…';
     try { await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' }); } catch (e) { /* 已经结束了 */ }
   };
+  let ended = false;
+  const finish = snap => {
+    if (ended) return;           // SSE 收尾和轮询兜底只能有一个算数
+    ended = true;
+    stop.classList.add('hide');
+    onDone.end(snap);
+  };
   const es = new EventSource(`/api/jobs/${jobId}/events`);
   es.onmessage = ev => {
     const snap = JSON.parse(ev.data);
     onDone.snap(snap);
-    if (snap.state === 'done' || snap.state === 'failed') {
-      es.close(); stop.classList.add('hide'); onDone.end(snap);
-    }
+    if (snap.state === 'done' || snap.state === 'failed') { es.close(); finish(snap); }
   };
-  es.onerror = () => { es.close(); stop.classList.add('hide'); };
+  // 以前这里只关连接：结局永远不来，「上传」「生成」一直是灰的，只能刷新页面。
+  // 现在断了就改成轮询，把结局取回来（取不回来也会给一个失败结局）。
+  es.onerror = () => {
+    es.close();
+    if (ended) return;
+    $('#detail').textContent = '进度连接断了，改成轮询…';
+    Flow.pollJob(getJob, jobId, { onSnap: s => { if (!ended) onDone.snap(s); } }).then(finish);
+  };
 }
 
 /* ---------------- 上传与解析 ---------------- */
@@ -125,33 +151,40 @@ function watch(jobId, onDone) {
 $('#pick').onclick = () => $('#file').click();
 $('#file').onchange = () => {
   const f = $('#file').files[0];
-  $('#fname').textContent = f ? f.name : '未选择文件';
+  $('#fname').textContent = f ? f.name : (docId ? '' : '未选择文件');
   $('#fname').title = f ? f.name : '';
 };
+
+function setBusy(on) {
+  busy = on;
+  $('#up').disabled = on;
+  $('#go').disabled = on || !(docId && section);
+}
 
 $('#up').onclick = async () => {
   const f = $('#file').files[0];
   if (!f) { $('#err').textContent = '先选一个 PDF。'; return; }
-  $('#up').disabled = true; $('#go').disabled = true;
+  setBusy(true);
   $('#err').textContent = ''; $('#pBarWrap').classList.remove('hide');
   $('#runLine').classList.remove('hide');
   $('#lessonBody').innerHTML = '<p class="hint">解析中…</p>';
   const fd = new FormData(); fd.append('file', f);
   try {
     const r = await fetch('/api/docs', { method: 'POST', body: fd });
-    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    if (!r.ok) throw new Error(await errOf(r));
     const up = await r.json();
     docId = up.doc_id;
     $('#upMeta').textContent = `${up.filename} · ${(up.bytes / 1048576).toFixed(1)} MB`;
     const p = await fetch(`/api/docs/${docId}/parse`, { method: 'POST' });
+    if (!p.ok) throw new Error(await errOf(p));
     const pj = await p.json();
-    if (!pj.ok && pj.detail) throw new Error(pj.detail);
-    if (pj.cached) { await afterParse(pj.result); return; }
+    if (pj.cached) { setBusy(false); await afterParse(pj.result); return; }
     watch(pj.job_id, {
       snap: s => stageView($('#pBar'), $('#stage'), $('#detail'), s),
       end: s => {
+        setBusy(false);
         if (s.state === 'failed') {
-          fail(s.error_info, s.error); $('#up').disabled = false;
+          fail(s.error_info, s.error);
           $('#lessonBody').innerHTML = '<p class="hint">解析失败。</p>';
           return;
         }
@@ -159,16 +192,20 @@ $('#up').onclick = async () => {
       }
     });
   } catch (e) {
-    $('#err').textContent = String(e.message || e);
-    $('#up').disabled = false;
+    setBusy(false);
+    // fetch 自己抛的是 TypeError("Failed to fetch")，对人没意义
+    $('#err').textContent = e instanceof TypeError ? '连不上本地服务，确认它还在跑。' : String(e.message || e);
+    $('#lessonBody').innerHTML = '<p class="hint">没传上去。</p>';
   }
 };
 
-async function afterParse(res, resetLesson = true) {
-  renderSections(res);
+async function afterParse(res, resetLesson = true, targetChapter = '') {
+  renderSections(res, targetChapter);
   await loadLayout();
-  $('#up').disabled = false;
-  $('#go').disabled = false;
+  $('#fname').textContent = '';
+  $('#fname').title = '';
+  $('#file').value = '';
+  if (!busy) { $('#up').disabled = false; $('#go').disabled = !section; }
   if (!resetLesson) return;      // 打开旧讲义时重解析：别把刚渲染好的讲义擦成提示
   $('#lessonBody').innerHTML = '<p class="hint">选好章节和题数，点「生成讲义」。' +
     `这份课件 ${res.pages} 页、${res.blocks} 块${res.ocr_pages.length ? '（其中 ' + res.ocr_pages.length + ' 页走 OCR）' : ''}。` +
@@ -182,7 +219,7 @@ async function loadLayout() {
 
 /* ---------------- 章节列表 ---------------- */
 
-function renderSections(res) {
+function renderSections(res, targetChapter = '') {
   sections = res.sections || [];      // 页码等元数据留在这里，别从 option 文案里正则抠
   const sel = $('#sec');
   sel.innerHTML = '';
@@ -190,70 +227,73 @@ function renderSections(res) {
   toc.innerHTML = '';
   for (const s of sections) {
     const o = document.createElement('option');
-    o.value = s.title;
+    o.value = String(s.n);              // 键是序号：两章各有一个「小结」时，标题分不开
     o.textContent = `${String(s.n).padStart(2, ' ')}. ${s.path.join(' > ')} · p${s.page_start}-${s.page_end} · ${s.chars} 字`;
     sel.appendChild(o);
 
     const b = document.createElement('button');
     b.className = 'toc-item';
-    b.dataset.title = s.title;
-    b.innerHTML = `${esc(s.title)}<br><span class="pg">p${s.page_start}-${s.page_end} · ${s.chars} 字</span>`;
+    b.dataset.n = String(s.n);
+    // 同名的节在目录里看不出区别：把上级路径带上
+    const dup = sections.filter(x => x.title === s.title).length > 1;
+    const label = dup && s.path.length > 1 ? s.path.join(' › ') : s.title;
+    b.title = s.path.join(' > ');
+    b.innerHTML = `${esc(label)}<br><span class="pg">p${s.page_start}-${s.page_end} · ${s.chars} 字</span>`;
     toc.appendChild(b);
   }
   sel.classList.remove('hide');
-  section = sections[0] || null;
-  if (res.hidden) $('#goMeta').textContent = `另有 ${res.hidden} 条参考文献段已隐藏`;
+  section = (targetChapter && Flow.matchSection(sections, targetChapter)) || sections[0] || null;
+  if (section) sel.value = String(section.n);
+  $('#goMeta').textContent = res.hidden ? `另有 ${res.hidden} 条参考文献段已隐藏` : '';
   markToc();
   renderSource();
 }
 
-function byTitle(title) {
-  return sections.find(s => s.title === title) || { title };
+function pickSection(key) {
+  section = Flow.findSection(sections, key);
+  if (section) $('#sec').value = String(section.n);
+  markToc();
+  renderSource();
 }
 
 function markToc() {
   document.querySelectorAll('.toc-item').forEach(b =>
-    b.classList.toggle('on', section && b.dataset.title === section.title));
+    b.classList.toggle('on', !!section && b.dataset.n === String(section.n)));
 }
 
 $('#tocBody').addEventListener('click', e => {
   const b = e.target.closest('.toc-item');
-  if (!b) return;
-  $('#sec').value = b.dataset.title;
-  section = byTitle(b.dataset.title);
-  markToc();
-  renderSource();
+  if (b) pickSection(b.dataset.n);
 });
 
-$('#sec').addEventListener('change', () => {
-  section = byTitle($('#sec').value);
-  markToc();
-  renderSource();
-});
+$('#sec').addEventListener('change', () => pickSection($('#sec').value));
 
 /* ---------------- 生成 ---------------- */
 
 $('#go').onclick = async () => {
-  if (!docId) return;
-  $('#go').disabled = true; $('#up').disabled = true;
+  if (!docId || !section) return;
+  setBusy(true);
   $('#err').textContent = ''; $('#runLine').classList.remove('hide');
   $('#pBarWrap').classList.remove('hide');
-  const body = JSON.stringify({ doc_id: docId, chapter: $('#sec').value,
-                                n_quiz: Number($('#nq').value) || 3 });
-  const r = await fetch('/api/lessons', { method: 'POST',
-      headers: { 'content-type': 'application/json' }, body });
-  if (!r.ok) {
-    $('#err').textContent = (await r.json()).detail || r.status;
-    $('#go').disabled = false; $('#up').disabled = false; return;
+  const body = JSON.stringify(Flow.lessonRequest(docId, section, $('#nq').value));
+  let job_id;
+  try {
+    const r = await fetch('/api/lessons', { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body });
+    if (!r.ok) { $('#err').textContent = await errOf(r); setBusy(false); return; }
+    ({ job_id } = await r.json());
+  } catch (e) {
+    $('#err').textContent = '连不上本地服务，确认它还在跑。';
+    setBusy(false);
+    return;
   }
-  const { job_id } = await r.json();
   watch(job_id, {
     snap: s => {
       stageView($('#pBar'), $('#stage'), $('#detail'), s);
       $('#goMeta').textContent = s.elapsed ? `${s.elapsed}s` : '';
     },
     end: s => {
-      $('#go').disabled = false; $('#up').disabled = false;
+      setBusy(false);
       if (s.state === 'failed') { fail(s.error_info, s.error); return; }
       lesson = s.result.lesson || {};
       $('#goMeta').textContent = `${s.result.sections || 0} 节 · ${s.result.quiz || 0} 题 · ${s.elapsed}s`;
@@ -344,10 +384,17 @@ function paintExport() {
 
 $('#export').onclick = () => {
   if (!openId) return;
+  if (!busy) $('#pBarWrap').classList.add('hide');
+  $('#runLine').classList.remove('hide');
+  $('#stage').textContent = '导出 PDF';
   $('#detail').textContent = '正在排版 PDF…';
+  $('#export').disabled = true;
   // 走 location 而不是 fetch：让 WebView2 / 浏览器自己接管下载（fetch 拿到的 bytes 还得自己存盘）
   location.href = `/api/lessons/${encodeURIComponent(openId)}/export.pdf`;
-  setTimeout(() => { $('#detail').textContent = '如果没弹下载，看浏览器的下载列表'; }, 1200);
+  setTimeout(() => {
+    if (!busy) $('#detail').textContent = '如果没弹下载，看浏览器的下载列表';
+    paintExport();
+  }, 1200);
 };
 
 function togglePick(id) {
@@ -366,12 +413,15 @@ async function purgePicked() {
     `会一起删掉 out/ 里对应的 JSON；原 PDF 如果没被别的讲义用着，也一起删。\n` +
     `能腾出大约 ${kb(total)}。删了就找不回来。`;
   if (!confirm(ask)) return;
-  const r = await fetch('/api/lessons/purge', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ids, drop_pdfs: true }),
-  });
-  if (!r.ok) { fail(null, (await r.json()).detail || '删除失败'); return; }
+  let r;
+  try {
+    r = await fetch('/api/lessons/purge', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids, drop_pdfs: true }),
+    });
+  } catch (e) { fail(null, '连不上本地服务，没删成。'); return; }
+  if (!r.ok) { fail(null, await errOf(r)); return; }
   const out = await r.json();
   picked.clear();
   await loadHistory();
@@ -381,55 +431,68 @@ async function purgePicked() {
 }
 
 /** 打开一份旧讲义。doc_id 是按文件内容算的，所以同一份 PDF 重传一次就接得上。 */
+const openSeq = Flow.latest();
+
 async function openLesson(id) {
-  const r = await fetch(`/api/lessons/${id}`);
-  if (!r.ok) {
-    fail(null, (await r.json()).detail || '打不开这份讲义');
+  const t = openSeq.next();
+  let r;
+  try { r = await fetch(`/api/lessons/${encodeURIComponent(id)}`); }
+  catch (e) {
+    if (!openSeq.isCurrent(t)) return;
+    fail(null, '连不上本地服务，讲义没打开。');
     return;
   }
+  if (!openSeq.isCurrent(t)) return;          // 连点两条：只认最后点的那条
+  if (!r.ok) { fail(null, await errOf(r)); return; }
   const { record, lesson: L } = await r.json();
+  if (!openSeq.isCurrent(t)) return;
   lesson = L;
   markHistory(id);
   renderLesson(L);
   $('#err').textContent = '';
   if (record.doc_id && record.doc_id === docId && layout) {
+    const matched = Flow.matchSection(sections, record.chapter);
+    if (matched) { section = matched; $('#sec').value = String(matched.n); markToc(); }
+    $('#fname').textContent = '';
+    $('#fname').title = '';
+    if (record.filename) $('#upMeta').textContent = record.filename;
     await renderSource();      // 同一份 PDF 还开着，原文照旧能点
-  } else if (record.doc_id && docId !== record.doc_id) {
+  } else if (record.doc_id && docId !== record.doc_id && !busy) {
     // 服务重启过，或者换了份 PDF：磁盘上有 uploads/<doc_id>.pdf 就能直接重解析
+    const prevDoc = docId;
     docId = record.doc_id;      // 必须先认下这份 PDF，afterParse 里就要按它取原文
+    $('#sourceBody').innerHTML = '<p class="hint">正在重新打开原 PDF…</p>';
+    $('#srcMeta').textContent = '';
     try {
-      const p = await fetch(`/api/docs/${record.doc_id}/parse`, { method: 'POST' });
+      const p = await fetch(`/api/docs/${encodeURIComponent(record.doc_id)}/parse`, { method: 'POST' });
+      if (!p.ok) throw new Error(await errOf(p));
       const pj = await p.json();
-      if (pj.job_id) {
-        const snap = await waitJob(pj.job_id);
-        if (snap.state !== 'done') throw new Error('parse failed');
-        await afterParse(snap.result, false);
-      } else {
-        await afterParse(pj.result, false);
-      }
+      const res = pj.job_id ? await Flow.pollJob(getJob, pj.job_id) : { state: 'done', result: pj.result };
+      if (res.state !== 'done') throw new Error(res.error || 'parse failed');
+      if (!openSeq.isCurrent(t)) return;      // 等解析的时候用户又点了别的
+      await afterParse(res.result, false, record.chapter);
       $('#upMeta').textContent = record.filename || '';
       await renderSource();
       return;
-    } catch (e) { /* 文件不在了，走下面的提示 */ }
+    } catch (e) { /* 文件不在了 / 解析失败，走下面的回滚 */ }
+    if (!openSeq.isCurrent(t)) return;
+    // 回滚：章节下拉和「生成」还对着上一份 PDF，docId 不能停在一份打不开的文件上，
+    // 否则下一次「生成讲义」会拿 A 的章节名去 B 里找。
+    docId = prevDoc;
+    layout = null;
+    _srcSpec = null;
+    setBusy(busy);
     $('#sourceBody').innerHTML =
       '<p class="hint">这是之前生成的讲义，原 PDF 已经不在磁盘上了。' +
       '重新上传同一份 PDF，就能点出处回原文。</p>';
     $('#srcMeta').textContent = '';
+  } else if (record.doc_id && docId !== record.doc_id) {
+    // 正在解析/生成别的：这时候换 docId 会把进行中的那条搅乱，先只看讲义
+    $('#sourceBody').innerHTML = '<p class="hint">正在处理另一份 PDF，忙完再打开这份讲义就能看原文。</p>';
+    $('#srcMeta').textContent = '';
   } else {
     await renderSource();
   }
-}
-
-/** 轮询一条任务直到结束（打开旧讲义时自动重解析用）。 */
-function waitJob(jobId) {
-  return new Promise(resolve => {
-    const t = setInterval(async () => {
-      const r = await fetch(`/api/jobs/${jobId}`);
-      if (!r.ok) { clearInterval(t); resolve({ state: 'failed' }); return; }
-      const s = await r.json();
-      if (s.state === 'done' || s.state === 'failed') { clearInterval(t); resolve(s); }
-    }, 500);
-  });
 }
 
 $('#histBody').addEventListener('click', e => {
@@ -462,54 +525,81 @@ $('#histDel').onclick = purgePicked;
 
 function renderLesson(L) {
   const parts = [];
+  if (L.chapter) parts.push(`<h2 class="lesson-title">${esc(L.chapter)}</h2>`);
+  if (L.summary_one_liner) parts.push(`<p class="oneliner">${inline(L.summary_one_liner)}</p>`);
   if (L.learning_objectives && L.learning_objectives.length) {
     parts.push('<div class="objectives"><h4>学完能做到</h4><ul>' +
-      L.learning_objectives.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>');
+      L.learning_objectives.map(x => '<li>' + inline(x) + '</li>').join('') + '</ul></div>');
   }
   (L.sections || []).forEach((s, i) => {
     parts.push(`<div class="sec" data-i="${i}"><h3>${i + 1}. ${esc(s.title)}</h3>`);
     parts.push(md(s.explanation_md));
     if (s.key_points && s.key_points.length) {
-      parts.push('<ul>' + s.key_points.map(k => '<li>' + esc(k) + '</li>').join('') + '</ul>');
+      parts.push('<ul>' + s.key_points.map(k => '<li>' + inline(k) + '</li>').join('') + '</ul>');
     }
     if (s.pitfalls && s.pitfalls.length) {
-      parts.push(s.pitfalls.map(t => '<div class="pitfall">易错：' + esc(t) + '</div>').join(''));
+      parts.push(s.pitfalls.map(t => '<div class="pitfall">易错：' + inline(t) + '</div>').join(''));
     }
     parts.push(chips(s.source_refs));
     parts.push('</div>');
   });
+  if (L.summary_bullets && L.summary_bullets.length) {
+    parts.push('<div class="summary-box"><h4>这一章要记住的</h4><ul>' +
+      L.summary_bullets.map(b => '<li>' + inline(b) + '</li>').join('') + '</ul></div>');
+  }
   if (L.quiz && L.quiz.length) parts.push(renderQuiz(L.quiz));
   if (!parts.length) parts.push('<p class="hint">这次没有生成出内容。</p>');
   $('#lessonBody').innerHTML = parts.join('');
   paintMath($('#lessonBody'));
   $('#lessonBody').scrollTop = 0;
+  $('#toTop').classList.add('hide');
+  updateQuizScore();
 }
 
 /* ---------------- 习题：先自己做，再判分 ---------------- */
 
+function updateQuizScore() {
+  const el = $('#quizScore');
+  if (!el) return;
+  const rows = [...document.querySelectorAll('#lessonBody .q')].map(q => ({
+    answered: !!q.dataset.graded,
+    ok: q.dataset.ok === '1',
+  }));
+  const st = Flow.quizStats(rows);
+  el.textContent = st.answered ? `已做 ${st.answered}/${st.total} 题 · 答对 ${st.right}` : '';
+}
+
 function renderQuiz(items) {
-  const out = ['<div class="quiz"><h3>习题</h3>' +
+  const out = ['<div class="quiz"><div class="quiz-head"><h3>习题</h3>' +
+               '<span class="quiz-score" id="quizScore"></span></div>' +
                '<p class="hint">先自己选（可多选会标出来），点「提交」才看得到对错。</p>'];
   items.forEach((it, i) => {
     const type = it.type || 'single';
     out.push(`<div class="q" data-i="${i}" data-type="${esc(type)}" data-picked="">`);
-    out.push(`<div class="stem">${i + 1}. ${esc(it.stem)}</div>`);
+    out.push(`<div class="stem">${i + 1}. ${inline(it.stem)}</div>`);
     if (type === 'fill') {
       out.push('<div class="fillrow"><input class="fillin" type="text" ' +
-               'placeholder="把答案写在这里" autocomplete="off"></div>');
+               'placeholder="把答案写在这里（回车提交）" autocomplete="off"></div>');
     } else {
       out.push('<div class="opts">' + (it.options || []).map((o, j) => {
         const k = String.fromCharCode(65 + j);
         return `<button class="opt" data-k="${k}">` +
-               `<b>${k}</b> ${esc(o)}</button>`;
+               `<b>${k}</b> ${inline(o)}</button>`;
       }).join('') + '</div>');
       if (type === 'multi') out.push('<div class="hint sm">这题是多选</div>');
     }
     out.push('<div class="qbar"><button class="qgo">提交</button>' +
              '<button class="qshow ghost">看答案</button>' +
              '<button class="qreset ghost hide">再做一次</button>' +
-             '<span class="qres"></span></div>');    out.push('<div class="qans hide"><div class="cans"></div>' +
-             (it.explanation ? `<div class="expl">${esc(it.explanation)}</div>` : '') +
+             '<span class="qres"></span></div>');
+    const badges = [
+      it.verified ? '<span class="vbadge">✓ 独立重解已验证</span>' : '',
+      it.knowledge_point ? `<span class="kptag">${esc(it.knowledge_point)}</span>` : '',
+    ].filter(Boolean).join('');
+    out.push('<div class="qans hide">' +
+             (badges ? `<div class="qmeta">${badges}</div>` : '') +
+             '<div class="cans"></div>' +
+             (it.explanation ? `<div class="expl">${inline(it.explanation)}</div>` : '') +
              chips(it.source_ref ? [it.source_ref] : []) + '</div>');
     out.push('</div>');
   });
@@ -547,6 +637,7 @@ function revealAnswer(q, it, res) {
   if (it.type === 'fill') line = `参考答案：${esc(want)}`;
   const cans = q.querySelector('.cans');
   cans.innerHTML = line;
+  paintMath(q.querySelector('.qans'));
   if (res && !res.reason) {
     const dom = q.querySelector('.qres');
     dom.textContent = res.ok ? '对了' : '不对';
@@ -587,15 +678,27 @@ $('#lesson').addEventListener('click', e => {
       if (want.indexOf(k) >= 0) b.classList.add('right');
       else if (res.ok === false && q.dataset.picked.indexOf(k) >= 0) b.classList.add('wrong');
     });
+    q.dataset.graded = '1';
+    q.dataset.ok = res.ok ? '1' : '0';
     revealAnswer(q, it, res);
     lockQuestion(q, true);
+    updateQuizScore();
     return;
   }
 
-  if (e.target.closest('.qshow')) { revealAnswer(q, it, null); lockQuestion(q, true); return; }
+  if (e.target.closest('.qshow')) {
+    q.dataset.graded = 'reveal';
+    q.dataset.ok = '0';
+    revealAnswer(q, it, null);
+    lockQuestion(q, true);
+    updateQuizScore();
+    return;
+  }
 
   if (e.target.closest('.qreset')) {
     q.dataset.picked = '';
+    q.dataset.graded = '';
+    q.dataset.ok = '';
     q.querySelectorAll('.opt').forEach(b => { b.classList.remove('on', 'right', 'wrong'); });
     const fill = q.querySelector('.fillin');
     if (fill) fill.value = '';
@@ -603,8 +706,25 @@ $('#lesson').addEventListener('click', e => {
     q.querySelector('.qres').textContent = '';
     q.querySelector('.qres').className = 'qres';
     lockQuestion(q, false);
+    updateQuizScore();
   }
 });
+
+$('#lesson').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const fill = e.target.closest('.fillin');
+  if (!fill) return;
+  const q = fill.closest('.q');
+  if (q && q.dataset.locked !== '1') {
+    e.preventDefault();
+    q.querySelector('.qgo').click();
+  }
+});
+
+$('#lessonBody').addEventListener('scroll', () => {
+  $('#toTop').classList.toggle('hide', $('#lessonBody').scrollTop < 280);
+});
+$('#toTop').onclick = () => $('#lessonBody').scrollTo({ top: 0, behavior: 'smooth' });
 
 /* ---------------- 原文 + 高亮 ---------------- */
 
@@ -658,8 +778,11 @@ function paintSource() {
   // 图片拿不到（原文件被挪走了）才退回文字版，让"点出处"至少还有个靶子。
   $('#sourceBody').innerHTML = shown.map(p =>
     `<div class="pg" data-page="${p.page}">` +
-    `<div class="pgno">PAGE ${p.page}</div>` +
-    `<div class="pgimg" data-w="${p.w || 595}" data-h="${p.h || 842}">` +
+    `<div class="pgno">PAGE ${p.page}` +
+    (p.ocr ? '<span class="ocr-tag">OCR 识别页（公式与摘录以原图为准）</span>' : '') +
+    `</div>` +
+    `<div class="pgimg" data-w="${p.w || 595}" data-h="${p.h || 842}"` +
+    ` style="aspect-ratio:${p.w || 595} / ${p.h || 842}">` +
     `<img src="/api/docs/${encodeURIComponent(docId)}/page/${p.page}.png" loading="lazy"` +
     ` alt="第 ${p.page} 页" onerror="this.closest('.pg').classList.add('noimg')">` +
     `<div class="hl-layer"></div>` +
@@ -669,25 +792,35 @@ function paintSource() {
     '</div></div></div>').join('');
 }
 
-/** 把选中那几条出处的矩形贴到页面图上（bbox 是 pt，按原页尺寸换成百分比）。 */
+function clearHighlight() {
+  for (const layer of document.querySelectorAll('.hl-layer')) layer.innerHTML = '';
+  for (const b of document.querySelectorAll('#sourceBody .blk.hl')) b.classList.remove('hl');
+  for (const c of document.querySelectorAll('#lesson .ref.on')) c.classList.remove('on');
+}
+
+/** 把选中那几条出处标出来：页面图上贴矩形，文字兜底视图里给块加 .hl。
+ *  返回该滚过去的第一个目标 —— 图挂了的页（.noimg）滚到文字块，不然滚到矩形。 */
 function paintHighlight(ids) {
   for (const layer of document.querySelectorAll('.hl-layer')) layer.innerHTML = '';
+  for (const b of document.querySelectorAll('#sourceBody .blk.hl')) b.classList.remove('hl');
   if (!layout || !layout.pages || !ids.length) return null;
   let first = null;
   for (const p of layout.pages) {
     const pg = document.querySelector(`.pg[data-page="${p.page}"]`);
     if (!pg) continue;
     const box = pg.querySelector('.pgimg');
-    const w = Number(box.dataset.w) || 595, h = Number(box.dataset.h) || 842;
-    const hits = p.blocks.filter(b => ids.includes(b.id) && b.bbox);
+    const t = Flow.highlightTargets(p, ids, box.dataset.w, box.dataset.h);
     const layer = pg.querySelector('.hl-layer');
-    layer.innerHTML = hits.map(b => {
-      const [x0, y0, x1, y1] = b.bbox;
-      const style = `left:${(x0 / w) * 100}%;top:${(y0 / h) * 100}%;` +
-                    `width:${((x1 - x0) / w) * 100}%;height:${((y1 - y0) / h) * 100}%`;
-      return `<div class="hlbox" style="${style}"></div>`;
-    }).join('');
-    if (!first && hits.length) first = layer.firstElementChild;
+    layer.innerHTML = t.boxes.map(r =>
+      `<div class="hlbox" style="left:${r.left}%;top:${r.top}%;width:${r.width}%;height:${r.height}%"></div>`
+    ).join('');
+    const marked = [];
+    for (const blk of pg.querySelectorAll('.blk')) {
+      if (t.blocks.includes(blk.dataset.id)) { blk.classList.add('hl'); marked.push(blk); }
+    }
+    if (first) continue;
+    if (pg.classList.contains('noimg')) first = marked[0] || null;
+    else first = layer.firstElementChild || (marked.length ? pg : null);   // 老讲义没 bbox：至少滚到那一页
   }
   return first;
 }
@@ -695,9 +828,11 @@ function paintHighlight(ids) {
 $('#lesson').addEventListener('click', e => {
   const btn = e.target.closest('.ref');
   if (!btn) return;
+  for (const c of document.querySelectorAll('#lesson .ref.on')) c.classList.remove('on');
+  btn.classList.add('on');
   if (srcCollapsed()) setSourceCollapsed(false);   // 收起来了就先展开，不然跳过去看不见
   const ids = (btn.dataset.ids || '').split(',').filter(Boolean);
-  const first = paintHighlight(ids);
+  const first = paintHighlight(ids) || document.querySelector(`.pg[data-page="${btn.dataset.page}"]`);
   if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
 });
 
@@ -849,7 +984,9 @@ $('#setClose').onclick = closeSettings;
 // 点弹层外面的空白不关：设置里有输入框和下拉，手一滑点到旁边就整页丢失太糟
 // （原来的 e.target === modal 判断干的就是这个）。要关就用 ✕ 或 Esc。
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !$('#setModal').classList.contains('hide')) closeSettings();
+  if (e.key !== 'Escape') return;
+  if (!$('#setModal').classList.contains('hide')) closeSettings();
+  else clearHighlight();
 });
 
 async function saveSettings(extra) {

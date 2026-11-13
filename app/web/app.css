@@ -14,6 +14,10 @@ button, .ref, .opt, .qbar, .histbar, .meta { -webkit-user-select: none; user-sel
 #lessonBody .md, #lessonBody .md *, #sourceBody .blk, #sourceBody .blk *,
 .qans, .qans * { -webkit-user-select: text; user-select: text; }
 .qans .ref, .qans button { -webkit-user-select: none; user-select: none; }
+.oneliner, .oneliner *, .summary-box, .summary-box *, .q .stem, .q .stem *, .lesson-title {
+  -webkit-user-select: text; user-select: text;
+}
+.vbadge, .kptag, .quiz-score, .ocr-tag { -webkit-user-select: none; user-select: none; }
 input, textarea, select { -webkit-user-select: text; user-select: text; }
 /* 触屏/鼠标按下时那层灰色高亮也一并关掉，它在这套配色里同样像残影 */
 * { -webkit-tap-highlight-color: transparent; }
@@ -21,7 +25,7 @@ input, textarea, select { -webkit-user-select: text; user-select: text; }
 /* ---- 顶栏 ---- */
 /* 顶栏是拖窗口的地方，得跟下面的内容区分开：底色调深一档 + 一条明显的分隔线 + 轻微内阴影。
    靠 --top 一个变量切换深浅两套，别再写死颜色。 */
-.top { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+.top { display: flex; align-items: center; gap: 8px; padding: 9px 14px;
        border-bottom: 1px solid var(--top-line); background: var(--top); flex: 0 0 auto;
        flex-wrap: wrap; box-shadow: inset 0 -6px 12px -10px rgba(0, 0, 0, .35); }
 .brand { font-weight: 600; font-size: 15px; letter-spacing: .02em; margin-right: 6px; }
@@ -37,10 +41,12 @@ input, textarea, select { -webkit-user-select: text; user-select: text; }
   background: var(--accent); color: #fff; font-size: 12.5px; font-family: inherit; cursor: pointer;
 }
 .pickfile:hover { background: var(--accent-dark); }
-#fname { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.top input[type=number] { width: 60px; padding: 5px 7px; border-radius: 6px;
+#fname { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#upMeta { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#fname:empty, #upMeta:empty { display: none; }
+.top input[type=number] { width: 56px; padding: 5px 7px; border-radius: 6px;
       border: 1px solid var(--line3); background: var(--bg); color: var(--fg); font-size: 13px; }
-.top select { max-width: 420px; padding: 5px 8px; border-radius: 6px;
+.top select { max-width: min(300px, 26vw); padding: 5px 8px; border-radius: 6px;
       border: 1px solid var(--line3); background: var(--bg); color: var(--fg); font-size: 13px; }
 label.inline { font-size: 12.5px; color: var(--dim2); }
 button { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--btn-line);
@@ -102,6 +108,7 @@ button:focus-visible, .hist-item:focus-visible, .toc-item:focus-visible,
         gap: 0; flex: 1 1 auto; min-height: 0; }
 .col { border-right: 1px solid var(--line); display: flex; flex-direction: column;
        min-width: 0; min-height: 0; }
+#lesson { position: relative; }
 .col:last-child { border-right: 0; }
 .colhead { font-size: 12.5px; letter-spacing: .08em; color: var(--dim3);
            padding: 9px 14px; border-bottom: 1px solid var(--top-line); flex: 0 0 auto;
@@ -187,6 +194,20 @@ button.danger:disabled { opacity: .4; }
 .toc-item .pg { color: var(--dim3); font-size: 12px; }
 
 /* 讲义 */
+.lesson-title { margin: 0 0 10px; font-size: 18px; line-height: 1.4; color: var(--fg2); }
+.oneliner { margin: 0 0 18px; padding: 9px 14px; border-left: 3px solid var(--accent);
+            background: var(--panel2); border-radius: 0 6px 6px 0; color: var(--fg);
+            font-size: 14px; }
+.summary-box { margin: 22px 0 6px; padding: 12px 16px; background: var(--panel2);
+               border: 1px solid var(--line); border-radius: 8px; }
+.summary-box h4 { margin: 0 0 6px; font-size: 12px; color: var(--dim2); letter-spacing: .06em; }
+.summary-box ul { margin: 0; padding-left: 20px; }
+.summary-box li { margin: 2px 0; }
+.top-jump { position: absolute; right: 20px; bottom: 18px; z-index: 20;
+            padding: 6px 12px; font-size: 12px; border-radius: 999px;
+            background: var(--panel2); color: var(--fg); border: 1px solid var(--line3);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.top-jump:hover { border-color: var(--accent); color: var(--fg2); }
 .sec { margin-bottom: 28px; }
 .sec h3 { font-size: 15px; margin: 18px 0 8px; color: var(--fg2); }
 .sec h4 { font-size: 13.5px; margin: 14px 0 6px; color: var(--fg); }
@@ -208,9 +229,14 @@ button.danger:disabled { opacity: .4; }
        border-radius: 20px; border: 1px solid var(--chip-line); background: var(--chip-bg);
        color: var(--chip-fg); cursor: pointer; }
 .ref:hover { background: var(--chip-bg-hover); color: var(--chip-fg-hover); }
+.ref.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* 习题 */
 .quiz { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 16px; }
+.quiz-head { display: flex; align-items: baseline; justify-content: space-between;
+             gap: 12px; flex-wrap: wrap; }
+.quiz-head h3 { margin: 0 0 4px; }
+.quiz-score { font-size: 12.5px; color: var(--dim2); font-variant-numeric: tabular-nums; }
 .q { margin-bottom: 18px; }
 .q .stem { font-weight: 500; margin-bottom: 8px; }
 .hint.sm { font-size: 12px; margin: -2px 0 6px; }
@@ -244,6 +270,11 @@ button.danger:disabled { opacity: .4; }
 
 .qans { margin-top: 10px; padding: 10px 12px; border-radius: 7px;
         background: var(--panel); border: 1px solid var(--line); }
+.qmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+.vbadge { display: inline-block; padding: 1px 8px; font-size: 11.5px; border-radius: 999px;
+          background: var(--hl-bg); color: var(--hl-fg); border: 1px solid var(--hl-line); }
+.kptag { display: inline-block; padding: 1px 8px; font-size: 11.5px; border-radius: 999px;
+         background: var(--panel2); color: var(--dim2); border: 1px solid var(--line2); }
 .qans .cans { color: var(--ok); font-size: 13px; font-weight: 500; }
 .qans .expl { color: var(--dim); font-size: 13px; margin-top: 6px; }
 .q .ans { color: var(--ok); font-size: 13px; margin-top: 4px; }
@@ -254,7 +285,9 @@ button.danger:disabled { opacity: .4; }
 
 /* 原文：显示的是原 PDF 的页面图，文字层只在图片拿不到时兜底 */
 .pg { margin-bottom: 22px; }
-.pgno { font-size: 11px; color: var(--dim3); letter-spacing: .1em; margin-bottom: 6px; }
+.pgno { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        font-size: 11px; color: var(--dim3); letter-spacing: .1em; margin-bottom: 6px; }
+.ocr-tag { font-size: 11px; letter-spacing: 0; color: var(--warn); text-transform: none; }
 .pgimg { position: relative; border: 1px solid var(--line); border-radius: 4px;
          overflow: hidden; background: #fff; box-shadow: 0 1px 6px rgba(15, 25, 40, .08); }
 .pgimg > img { display: block; width: 100%; height: auto; }
@@ -264,6 +297,7 @@ button.danger:disabled { opacity: .4; }
          animation: hl-in .18s ease-out; }
 @keyframes hl-in { from { opacity: 0; } to { opacity: .42; } }
 .pgtext { display: none; padding: 6px 0; }
+.pg.noimg .pgimg { aspect-ratio: auto !important; background: var(--panel); padding: 4px 6px; }
 .pg.noimg .pgimg > img, .pg.noimg .hl-layer { display: none; }
 .pg.noimg .pgtext { display: block; }
 .blk { font-size: 13px; line-height: 1.65; color: var(--dim); padding: 3px 8px;
@@ -386,3 +420,10 @@ button.danger:disabled { opacity: .4; }
 /* 收起原文后讲义独占整行，一行会拉得太长：只让文字占四分之三，右边留白。 */
 .cols.no-src #lessonBody { padding-right: 25%; }
 .colhead .spacer { flex: 1 1 auto; }
+
+@media (max-width: 960px) {
+  .cols, .cols.no-src { grid-template-columns: 1fr; overflow-y: auto; }
+  .col { border-right: 0; border-bottom: 1px solid var(--line); min-height: 220px; }
+  .pad { max-height: 58vh; }
+  .cols.no-src #lessonBody { padding-right: 16px; }
+}
