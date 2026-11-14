@@ -36,7 +36,7 @@
   <input type="file" id="file" accept=".pdf" class="sr-only">
   <button id="pick" class="pickfile">选择文件</button>
   <span class="meta" id="fname">未选择文件</span>
-  <button id="up">上传并解析</button>
+  <button id="up" class="tonal">上传并解析</button>
   <span class="meta" id="upMeta"></span>
   <span class="sep"></span>
   <select id="sec" class="hide" title="章节"></select>
@@ -77,11 +77,21 @@
       <button class="ghost" id="srcToggle" title="收起/展开原文">收起原文</button>
     </div>
     <div id="lessonBody" class="pad">
-      <p class="hint">上传课件 → 选一章 → 生成。</p>
+      <div class="empty-desk">
+        <div class="empty-kicker">AI STUDY · 讲义工坊</div>
+        <h2>把整本课件拆成有出处的讲义</h2>
+        <p class="hint">每句结论都可以点回原文页核对；每道习题都在打乱选项后独立重解验证，不凑数。</p>
+        <ol class="empty-steps">
+          <li><strong>选 PDF</strong><span>支持文字版教材、论文与扫描图片课件</span></li>
+          <li><strong>定章节</strong><span>上传解析后，从左侧目录或顶部选单挑出一章</span></li>
+          <li><strong>读讲义</strong><span>点击讲解里的「出处」即可对照原页高亮</span></li>
+        </ol>
+      </div>
     </div>
     <button class="top-jump hide" id="toTop" type="button" title="回到讲义顶部">↑ 顶部</button>
   </section>
   <section class="col" id="source">
+    <div class="col-resizer" id="colResizer" role="separator" aria-orientation="vertical" aria-label="调整讲义与原文栏宽度" title="拖动调整讲义与原文栏比例（双击恢复默认）"></div>
     <div class="colhead">原文 <span class="meta" id="srcMeta"></span></div>
     <div id="sourceBody" class="pad">
       <p class="hint">生成后这里显示本章原文，点讲义里的「出处」会跳过来并高亮。</p>

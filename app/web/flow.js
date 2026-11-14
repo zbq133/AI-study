@@ -123,6 +123,33 @@
     return { total: list.length, answered: answered, right: right };
   }
 
+  const DEFAULT_SPLIT = { lessonFr: '1.38fr', srcFr: '0.88fr', ratio: 0.611 };
+
+  /** 把讲义占比（0.38–0.74）换算成 CSS Grid 的 fr 值；非法或空值回到默认黄金比例。 */
+  function splitCss(ratio) {
+    if (ratio === null || ratio === undefined || ratio === '') return Object.assign({}, DEFAULT_SPLIT);
+    const r = Number(ratio);
+    if (!Number.isFinite(r)) return Object.assign({}, DEFAULT_SPLIT);
+    const clamped = Math.min(0.74, Math.max(0.38, r));
+    return {
+      lessonFr: clamped.toFixed(3) + 'fr',
+      srcFr: (1 - clamped).toFixed(3) + 'fr',
+      ratio: Number(clamped.toFixed(3)),
+    };
+  }
+
+  /** 根据拖拽指针的 X 坐标计算讲义与原文栏比例（纯计算，不碰 DOM）。 */
+  function splitRatio(clientX, colsRect, tocW) {
+    if (clientX === null || clientX === undefined || clientX === '' || !colsRect) {
+      return Object.assign({}, DEFAULT_SPLIT);
+    }
+    const x = Number(clientX);
+    const main = (Number(colsRect.width) || 0) - Math.max(0, Number(tocW) || 0);
+    if (!Number.isFinite(x) || main < 320) return Object.assign({}, DEFAULT_SPLIT);
+    const raw = (x - (Number(colsRect.left) || 0) - Math.max(0, Number(tocW) || 0)) / main;
+    return splitCss(raw);
+  }
+
   const api = {
     findSection: findSection,
     matchSection: matchSection,
@@ -132,6 +159,9 @@
     latest: latest,
     highlightTargets: highlightTargets,
     quizStats: quizStats,
+    splitCss: splitCss,
+    splitRatio: splitRatio,
+    DEFAULT_SPLIT: DEFAULT_SPLIT,
     GONE: GONE,
     UNREACHABLE: UNREACHABLE,
   };

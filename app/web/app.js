@@ -1221,6 +1221,59 @@ let _srcExpanded = null;
 try { _srcExpanded = localStorage.getItem(SRC_KEY); } catch (e) { /* 无所谓 */ }
 setSourceCollapsed(_srcExpanded !== '1');      // 默认收起
 
+/* ---------- 讲义 / 原文两栏比例可拖拽微调 ---------- */
+
+const SPLIT_KEY = 'study.splitRatio';
+
+function applySplitRatio(ratio) {
+  const cols = document.querySelector('.cols');
+  if (!cols || typeof Flow === 'undefined' || !Flow.splitCss) return;
+  const spec = Flow.splitCss(ratio);
+  cols.style.setProperty('--lesson-fr', spec.lessonFr);
+  cols.style.setProperty('--src-fr', spec.srcFr);
+}
+
+(function bindSplitResizer() {
+  const resizer = $('#colResizer');
+  const cols = document.querySelector('.cols');
+  if (!resizer || !cols || typeof Flow === 'undefined' || !Flow.splitRatio) return;
+
+  try { applySplitRatio(localStorage.getItem(SPLIT_KEY)); } catch (e) { applySplitRatio(null); }
+
+  let dragging = false;
+  resizer.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || srcCollapsed() || window.innerWidth <= 960) return;
+    dragging = true;
+    resizer.classList.add('on');
+    document.body.classList.add('col-resizing');
+    resizer.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  resizer.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const toc = $('#toc');
+    const tocW = toc ? toc.getBoundingClientRect().width : 264;
+    const next = Flow.splitRatio(e.clientX, cols.getBoundingClientRect(), tocW);
+    cols.style.setProperty('--lesson-fr', next.lessonFr);
+    cols.style.setProperty('--src-fr', next.srcFr);
+    try { localStorage.setItem(SPLIT_KEY, String(next.ratio)); } catch (err) { /* 无所谓 */ }
+  });
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove('on');
+    document.body.classList.remove('col-resizing');
+  };
+  resizer.addEventListener('pointerup', endDrag);
+  resizer.addEventListener('pointercancel', endDrag);
+  resizer.addEventListener('dblclick', () => {
+    applySplitRatio(null);
+    try { localStorage.removeItem(SPLIT_KEY); } catch (err) { /* 无所谓 */ }
+  });
+})();
+
 /* ---------- 第一次打开：把人领到「模型接入」 ---------- */
 
 // 没填密钥时点了生成只会得到一句"还差模型配置"，不如一开始就把设置打开、把地址填好。

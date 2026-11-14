@@ -187,3 +187,20 @@ def test_quiz_stats_counts_answered_and_correct():
         "total": 3, "answered": 2, "right": 1,
     }
 
+
+def test_split_ratio_clamps_drag_bounds_and_falls_back_on_narrow_screen():
+    # 默认讲义略宽于原文栏（约 61% : 39%），主工作区太窄或非法输入回退默认值
+    d = _flow("f.splitCss(null)")
+    assert d["lessonFr"] == "1.38fr" and d["srcFr"] == "0.88fr"
+    assert _flow("f.splitCss('bad')") == d
+    assert _flow("f.splitRatio(500, {left:0, width:500}, 264)") == d
+
+    # 拖拽中间位置、直接传入占空比、以及拖出左右边界时的安全钳制（0.38..0.74）
+    mid = _flow("f.splitRatio(864, {left:0, width:1264}, 264)")
+    assert mid == {"lessonFr": "0.600fr", "srcFr": "0.400fr", "ratio": 0.6}
+    assert _flow("f.splitCss(0.1)")["ratio"] == 0.38
+    assert _flow("f.splitCss(0.95)")["ratio"] == 0.74
+    assert _flow("f.splitRatio(100, {left:0, width:1264}, 264)")["ratio"] == 0.38
+    assert _flow("f.splitRatio(1300, {left:0, width:1264}, 264)")["ratio"] == 0.74
+
+

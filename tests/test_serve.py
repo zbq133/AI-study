@@ -175,7 +175,28 @@ def test_colors_all_come_from_the_palette(env):
         assert css.count(f"var({var})") >= 2, var
     # 浅色主题是覆盖变量，不许重复定义规则（那样会越改越乱）
     light = re.search(r":root\[data-theme=\"light\"\]\s*\{([^}]*)\}", css).group(1)
-    assert "--bg:#f7f9fc" in light.replace(" ", "")
+    assert "--bg:#f6f1e7" in light.replace(" ", "")
+
+
+def test_warm_palette_and_asymmetric_column_proportions(env):
+    """暖色书房配色 + 主讲义栏宽于原文对照栏，并支持拖拽微调比例。"""
+    with TestClient(serve.app) as client:
+        css = client.get("/static/app.css").text
+        html = client.get("/").text
+        js = client.get("/static/app.js").text
+    light = dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", re.search(
+        r":root\[data-theme=\"light\"\]\s*\{([^}]*)\}", css).group(1)))
+    # 纸面要比桌面底色亮，且整体保持暖色倾向（红通道高于蓝通道）
+    assert _luminance(light["panel"]) > _luminance(light["bg"])
+    acc_r, _, acc_b = (int(light["accent"][i:i + 2], 16) for i in (1, 3, 5))
+    assert acc_r > acc_b and _contrast(light["accent"], "#ffffff") >= 4.5
+    # 三栏中讲义默认权重显著高于原文栏，并限制最大阅读行宽
+    cols = re.search(r"\.cols\s*\{([^}]*)\}", css).group(1)
+    m = re.search(r"--lesson-fr,\s*([\d.]+)fr\).*--src-fr,\s*([\d.]+)fr", cols)
+    assert m and float(m.group(1)) > float(m.group(2)), cols
+    assert re.search(r"#lesson\s*\{[^}]*background:\s*var\(--panel\)", css)
+    assert re.search(r"#lessonBody\s*>\s*\*\s*\{[^}]*max-width:", css)
+    assert 'id="colResizer"' in html and ".col-resizer" in css and "Flow.splitRatio" in js
 
 
 def _luminance(hex_color):
