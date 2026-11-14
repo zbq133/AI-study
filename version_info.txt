@@ -2,8 +2,8 @@
 # 杀软和 SmartScreen 对"有名字有版本有公司"的包也客气一点。
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 1, 0, 0),
+    prodvers=(1, 1, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -18,12 +18,12 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'AI Study'),
           StringStruct('FileDescription', 'AI Study — 课件转讲义与习题'),
-          StringStruct('FileVersion', '1.0.0.0'),
+          StringStruct('FileVersion', '1.1.0.0'),
           StringStruct('InternalName', 'AI Study'),
           StringStruct('LegalCopyright', ''),
           StringStruct('OriginalFilename', 'AI Study.exe'),
           StringStruct('ProductName', 'AI Study'),
-          StringStruct('ProductVersion', '1.0.0.0'),
+          StringStruct('ProductVersion', '1.1.0.0'),
         ],
       )
     ]),

@@ -1108,7 +1108,7 @@ $('#updBtn').onclick = async () => {
       setTimeout(() => location.reload(), 700);
       return;
     }
-    $('#verMsg').textContent = `已经是最新版本 v${now || _serverVer || '1.0'}。`;
+    $('#verMsg').textContent = `已经是最新版本 v${now || _serverVer || '1.1'}。`;
   } catch (e) {
     $('#verMsg').textContent = '问不到服务端版本：服务可能没起来。';
   } finally {

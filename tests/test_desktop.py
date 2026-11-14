@@ -287,7 +287,9 @@ def test_the_exe_carries_a_version_resource():
     from pathlib import Path
 
     info = Path("version_info.txt").read_text(encoding="utf-8")
-    assert "AI Study" in info and "(1, 0, 0, 0)" in info
+    assert "AI Study" in info
+    assert "filevers=(1, 1, 0, 0)" in info and "prodvers=(1, 1, 0, 0)" in info
+    assert "'FileVersion', '1.1.0.0'" in info and "'ProductVersion', '1.1.0.0'" in info
     build = Path("build_desktop.ps1").read_text(encoding="utf-8-sig")
     assert "--version-file" in build and "version_info.txt" in build
 

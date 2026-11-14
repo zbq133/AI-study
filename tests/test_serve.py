@@ -438,9 +438,9 @@ def test_version_tab_shows_the_version_and_has_an_update_button(env):
         html = client.get("/").text
         js = client.get("/static/app.js").text
         health = client.get("/api/health").json()
-    assert 'id="verNow"' in html and "v1.0" in html
+    assert 'id="verNow"' in html and "v1.1" in html
     assert re.search(r'id="updBtn"[^>]*>更新<', html), "没有「更新」按钮"
-    assert health["version"] == serve.__version__ == "1.0"
+    assert health["version"] == serve.__version__ == "1.1"
     assert "/api/health" in js and "location.reload()" in js
     # 打开设置时就要把服务端的版本号写回页面，不能一直显示写死的那个
     body = js[js.index("async function paintVersion"):js.index("$('#updBtn')")]
